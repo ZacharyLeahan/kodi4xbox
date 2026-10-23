@@ -5,6 +5,28 @@
 ## Kodi
 This is port of Kodi to Original Xbox using open source toolchain known as [NXDK (New Xbox Development Kit)](https://github.com/XboxDev/nxdk). It's currently in pre-alpha stage. I will need help from other devs to get it working, so contributions are welcome!
 
+## Project intent
+
+This fork aims to make modern Kodi useful and efficient on the original Xbox,
+starting with Kodi 21.3 and a 128 MiB console. The first priority is a working
+application built with today's NXDK, using a pinned, reproducible toolchain and
+documented compatibility patches, including the exception support Kodi needs.
+
+As the application develops, we record platform limitations, workarounds and
+their costs in the [NXDK improvement ledger](docs/NXDK-IMPROVEMENT-LEDGER.md).
+Entries distinguish confirmed defects from suspected causes and identify
+whether the work belongs in NXDK, a dependency or Kodi itself.
+
+Once we have made the application work as well as practical on that foundation,
+we intend to focus on improvements to NXDK and its dependencies that can make
+Kodi better. Small reproductions, hardware measurements and regression tests
+will guide that work and potential upstream contributions. Each improvement
+should have a demonstrated application benefit and a clear path to retiring
+the corresponding local workaround.
+
+The [existing Xbox build guide](docs/README.NXDK.md) describes the inherited
+build setup. Toolchain and playback implementation updates will land separately.
+
 ## Download links
 This software is in alpha and currently we are only providing nightly releases.
 
