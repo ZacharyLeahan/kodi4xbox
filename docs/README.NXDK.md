@@ -99,3 +99,11 @@ has been verified. Do not replace the main dashboard.
   ```
 - Build Kodi in same way as described above, but make sure to build Debug version. You do that by setting `-DCMAKE_BUILD_TYPE` to `Debug`
 - After succesfull build, open Xemu, load ISO from build folder and then close Xemu. After that, start debugging from within Visual Studio Code by pressing `CTRL+SHIFT+D` and then `F5`
+
+## CI artifacts
+
+Pull requests and pushes to `master` build Kodi, the pinned SDK and the separate
+exception/RTTI probe. The workflow uploads the ISO, packaged application, runtime
+probe and toolchain identity as a GitHub Actions artifact. It uses the repository's
+existing token permissions. Automatic nightly release publication is replaced by
+these artifacts; releases can be published separately after validation.
