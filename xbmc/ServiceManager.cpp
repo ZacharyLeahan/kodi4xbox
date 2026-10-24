@@ -7,6 +7,7 @@
  */
 
 #include "ServiceManager.h"
+#include "platform/xbox/StartupDiagnostics.h"
 
 #include "ContextMenuManager.h"
 #include "DatabaseManager.h"
@@ -184,25 +185,42 @@ void CServiceManager::DeinitStageTwo()
   m_WSDiscovery.reset();
 #endif
 
+  XBOX_STARTUP::Checkpoint("services: weather");
   m_weatherManager.reset();
+  XBOX_STARTUP::Checkpoint("services: power");
   m_powerManager.reset();
+  XBOX_STARTUP::Checkpoint("services: file extensions");
   m_fileExtensionProvider.reset();
+  XBOX_STARTUP::Checkpoint("services: peripherals");
   m_peripherals.reset();
+  XBOX_STARTUP::Checkpoint("services: input");
   m_inputManager.reset();
+  XBOX_STARTUP::Checkpoint("services: context menu");
   m_contextMenuManager.reset();
+  XBOX_STARTUP::Checkpoint("services: addon services");
   m_serviceAddons.reset();
+  XBOX_STARTUP::Checkpoint("services: favourites");
   m_favouritesService.reset();
+  XBOX_STARTUP::Checkpoint("services: binary cache");
   m_binaryAddonCache.reset();
+  XBOX_STARTUP::Checkpoint("services: data cache");
   m_dataCacheCore.reset();
+  XBOX_STARTUP::Checkpoint("services: mime types");
   m_extsMimeSupportList.reset();
+  XBOX_STARTUP::Checkpoint("services: repository updater");
   m_repositoryUpdater.reset();
+  XBOX_STARTUP::Checkpoint("services: addon manager");
   m_addonMgr.reset();
+  XBOX_STARTUP::Checkpoint("services: database manager");
   m_databaseManager.reset();
 
+  XBOX_STARTUP::Checkpoint("services: media manager");
   m_mediaManager->Stop();
   m_mediaManager.reset();
 
+  XBOX_STARTUP::Checkpoint("services: platform");
   m_Platform->DeinitStageTwo();
+  XBOX_STARTUP::Checkpoint("services: complete");
 }
 
 void CServiceManager::DeinitStageOne()

@@ -1,11 +1,12 @@
 name: Build
 on:
+  pull_request:
   push:
     branches:
       - master
 jobs:
   Xbox:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
     - name: Checkout Repository
       uses: actions/checkout@v4
@@ -17,28 +18,31 @@ jobs:
     - name: Install prerequisites
       run: |
         sudo apt update
-        sudo apt install -y build-essential cmake flex bison clang lld git llvm
+        sudo apt install -y build-essential cmake flex bison clang-20 lld-20 git llvm-20 python3 pkg-config
+        echo "/usr/lib/llvm-20/bin" >> $GITHUB_PATH
+
+    - name: Check host regression and build helpers
+      run: |
+        python3 -m py_compile scripts/*.py
+        bash -n scripts/build-nxdk.sh
+        mkdir -p build/condition-host
+        c++ -std=c++17 -pthread -DNXDK -Itests/threads/host -Ixbmc tests/threads/host/condition.cpp -o build/condition-host/test
+        build/condition-host/test
 
     - name: Pull NXDK
       run: |
-        git clone https://github.com/xbmc4xbox/nxdk.git ~/nxdk
-        cd ~/nxdk
-        git checkout rtti_exceptions
-        git submodule update --init --recursive
-        echo "NXDK_DIR=$HOME/nxdk" >> $GITHUB_ENV
+        python3 scripts/bootstrap-nxdk.py
+        echo "NXDK_DIR=$GITHUB_WORKSPACE/.local/nxdk" >> $GITHUB_ENV
 
-    - name: Compile NXDK
+    - name: Compile Kodi and NXDK
       run: |
-        cd ~/nxdk/samples/hello++
-        sed -i '/NXDK_CXX = y/a NXDK_SDL = y' Makefile
-        eval "$(../../bin/activate -s)"
-        make -j$(nproc)
+        JOBS=$(nproc) bash scripts/build-nxdk.sh
 
-    - name: Compile program
+    - name: Compile exception and RTTI runtime checks
       run: |
-        mkdir build && cd build
-        cmake .. -DCMAKE_TOOLCHAIN_FILE=${NXDK_DIR}/share/toolchain-nxdk.cmake -DCMAKE_BUILD_TYPE=Release
-        cmake --build . --parallel $(nproc)
+        export PATH="$NXDK_DIR/bin:$PATH"
+        mkdir -p build/runtime
+        make -C build/runtime -f "$GITHUB_WORKSPACE/tests/nxdk-runtime/Makefile" -j$(nproc)
 
     - name: Prepare release
       run: |
@@ -47,16 +51,14 @@ jobs:
         cp -r xiso/* Kodi/
         zip -r Kodi.zip Kodi
 
-    - name: Create Nightly Release
-      uses: softprops/action-gh-release@v2
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v4
       with:
-        tag_name: nightly
-        name: Nightly build
-        files: |
+        name: kodi-nxdk-${{ github.sha }}
+        path: |
           build/Kodi.iso
           build/Kodi.zip
-        body: "Automated nightly build."
-        draft: false
-        prerelease: true
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          build/runtime/bin/default.xbe
+          .local/nxdk/.kodi-toolchain.json
+        include-hidden-files: true
+        if-no-files-found: error

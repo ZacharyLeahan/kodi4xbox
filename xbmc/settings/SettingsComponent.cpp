@@ -107,19 +107,24 @@ void CSettingsComponent::Deinitialize()
   {
     if (m_state == State::LOADED)
     {
+      CLog::Log(LOGDEBUG, "Settings teardown: unload");
       m_settings->Unload();
 
       XFILE::IDirectory::UnregisterProfileManager();
       CSpecialProtocol::UnregisterProfileManager();
     }
+    CLog::Log(LOGDEBUG, "Settings teardown: profile manager");
     m_profileManager->Uninitialize();
 
     URIUtils::UnregisterAdvancedSettings();
+    CLog::Log(LOGDEBUG, "Settings teardown: advanced settings");
     m_advancedSettings->Uninitialize(*m_settings->GetSettingsManager());
 
+    CLog::Log(LOGDEBUG, "Settings teardown: settings manager");
     m_settings->Uninitialize();
   }
   m_state = State::DEINITED;
+  CLog::Log(LOGDEBUG, "Settings teardown complete");
 }
 
 std::shared_ptr<CSettings> CSettingsComponent::GetSettings()
@@ -379,11 +384,19 @@ bool CSettingsComponent::InitDirectoriesXbox(bool bPlatformDirectories)
   CSpecialProtocol::SetXBMCPath(xbmcPath);
   CSpecialProtocol::SetXBMCBinAddonPath(xbmcPath + "addons");
 
+#if defined(KODI_XBOX_STARTUP_DIAGNOSTICS) && !defined(KODI_XBOX_DIAGNOSTIC_NORMAL_PROFILE)
+  std::string strWin32UserFolder = "Q:\\diagnostics\\profile\\";
+#else
   std::string strWin32UserFolder = "E:\\UDATA\\Kodi\\";
+#endif
   CSpecialProtocol::SetLogPath(strWin32UserFolder);
   CSpecialProtocol::SetHomePath(strWin32UserFolder);
   CSpecialProtocol::SetMasterProfilePath(URIUtils::AddFileToFolder(strWin32UserFolder, "userdata"));
+#if defined(KODI_XBOX_STARTUP_DIAGNOSTICS) && !defined(KODI_XBOX_DIAGNOSTIC_NORMAL_PROFILE)
+  CSpecialProtocol::SetTempPath("Q:\\diagnostics\\cache\\");
+#else
   CSpecialProtocol::SetTempPath("Z:\\");
+#endif
 
   CreateUserDirs();
 

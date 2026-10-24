@@ -8,6 +8,7 @@
 
 #include "application/Application.h"
 #include "platform/MessagePrinter.h"
+#include "platform/xbox/StartupDiagnostics.h"
 
 #ifdef TARGET_WINDOWS_DESKTOP
 #include "platform/win32/IMMNotificationClient.h"
@@ -23,6 +24,7 @@ extern "C" int XBMC_Run(bool renderGUI)
 {
   int status = -1;
 
+  KODI::XBOX_STARTUP::SetStage(KODI::XBOX_STARTUP::Stage::CreateApplication);
   if (!g_application.Create())
   {
     CMessagePrinter::DisplayError("ERROR: Unable to create application. Exiting");
@@ -33,6 +35,7 @@ extern "C" int XBMC_Run(bool renderGUI)
   CXBMCApp::Get().Initialize();
 #endif
 
+  KODI::XBOX_STARTUP::SetStage(KODI::XBOX_STARTUP::Stage::CreateGUI);
   if (renderGUI && !g_application.CreateGUI())
   {
     CMessagePrinter::DisplayError("ERROR: Unable to create GUI. Exiting");
@@ -40,6 +43,7 @@ extern "C" int XBMC_Run(bool renderGUI)
       g_application.Cleanup();
     return status;
   }
+  KODI::XBOX_STARTUP::SetStage(KODI::XBOX_STARTUP::Stage::Initialize);
   if (!g_application.Initialize())
   {
     CMessagePrinter::DisplayError("ERROR: Unable to Initialize. Exiting");
@@ -58,6 +62,7 @@ extern "C" int XBMC_Run(bool renderGUI)
   }
 #endif
 
+  KODI::XBOX_STARTUP::SetStage(KODI::XBOX_STARTUP::Stage::Running);
   status = g_application.Run();
 
 #ifdef TARGET_WINDOWS_DESKTOP

@@ -1,4 +1,5 @@
 function(add_xbox_build_steps TARGET_NAME XBE_TITLE XBOX_ISO_DIR)
+    find_program(KODI_PYTHON3 NAMES python3 REQUIRED)
     # Ensure ISO output directory exists
     file(MAKE_DIRECTORY ${XBOX_ISO_DIR})
 
@@ -11,6 +12,8 @@ function(add_xbox_build_steps TARGET_NAME XBE_TITLE XBOX_ISO_DIR)
                 -OUT:${CMAKE_CURRENT_BINARY_DIR}/default.xbe
                 -TITLE:${XBE_TITLE}
                 ${CMAKE_CURRENT_BINARY_DIR}/xbmc.exe > NUL 2>&1
+        COMMAND "${KODI_PYTHON3}" "${CMAKE_SOURCE_DIR}/scripts/configure-xbe.py"
+                "${CMAKE_CURRENT_BINARY_DIR}/default.xbe"
     )
     add_dependencies(${TARGET_NAME}_cxbe_convert ${TARGET_NAME})
 

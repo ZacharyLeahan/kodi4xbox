@@ -1,0 +1,1158 @@
+diff --git a/bin/nxdk-cxx b/bin/nxdk-cxx
+index 1724f62..1b587df 100755
+--- a/bin/nxdk-cxx
++++ b/bin/nxdk-cxx
+@@ -22,5 +22,4 @@ clang \
+     -DNXDK \
+     -D__STDC__=1 \
+     -U__STDC_NO_THREADS__ \
+-    -fno-exceptions \
+     "$@"
+diff --git a/lib/winapi/timezoneapi.c b/lib/winapi/timezoneapi.c
+index fd89316..85b52eb 100644
+--- a/lib/winapi/timezoneapi.c
++++ b/lib/winapi/timezoneapi.c
+@@ -296,3 +296,29 @@ BOOL FileTimeToLocalFileTime (const FILETIME *lpFileTime, LPFILETIME lpLocalFile
+     lpLocalFileTime->dwHighDateTime = fileTime.HighPart;
+     return TRUE;
+ }
++
++BOOL LocalFileTimeToFileTime (const FILETIME *lpLocalFileTime, LPFILETIME lpFileTime)
++{
++    if (!lpLocalFileTime || !lpFileTime) {
++        SetLastError(ERROR_INVALID_PARAMETER);
++        return FALSE;
++    }
++
++    TIME_ZONE_INFORMATION timeZoneInformation;
++    GetTimeZoneInformation(&timeZoneInformation);
++
++    // Get the timezone offset bias in 100-nanosecond intervals
++    LARGE_INTEGER offset;
++    offset.QuadPart = timeZoneInformation.Bias;
++    offset.QuadPart *= 60LL * 10000000LL;
++
++    LARGE_INTEGER localFileTime;
++    localFileTime.LowPart = lpLocalFileTime->dwLowDateTime;
++    localFileTime.HighPart = lpLocalFileTime->dwHighDateTime;
++
++    localFileTime.QuadPart += offset.QuadPart;
++
++    lpFileTime->dwLowDateTime = localFileTime.LowPart;
++    lpFileTime->dwHighDateTime = localFileTime.HighPart;
++    return TRUE;
++}
+diff --git a/lib/winapi/timezoneapi.h b/lib/winapi/timezoneapi.h
+index 3d9ccc2..3ce6b77 100644
+--- a/lib/winapi/timezoneapi.h
++++ b/lib/winapi/timezoneapi.h
+@@ -33,6 +33,7 @@ DWORD GetTimeZoneInformation (LPTIME_ZONE_INFORMATION lpTimeZoneInformation);
+ BOOL FileTimeToSystemTime (const FILETIME *lpFileTime, LPSYSTEMTIME lpSystemTime);
+ BOOL SystemTimeToFileTime (const SYSTEMTIME *lpSystemTime, LPFILETIME lpFileTime);
+ BOOL FileTimeToLocalFileTime (const FILETIME *lpFileTime, LPFILETIME lpLocalFileTime);
++BOOL LocalFileTimeToFileTime (const FILETIME *lpLocalFileTime, LPFILETIME lpFileTime);
+ 
+ #ifdef __cplusplus
+ }
+diff --git a/lib/xboxkrnl/xboxdef.h b/lib/xboxkrnl/xboxdef.h
+index b9794fc..7a12d8f 100644
+--- a/lib/xboxkrnl/xboxdef.h
++++ b/lib/xboxkrnl/xboxdef.h
+@@ -27,7 +27,7 @@ typedef long long LONGLONG, *PLONGLONG;
+ typedef unsigned char BYTE;
+ typedef unsigned char UCHAR, *PUCHAR;
+ typedef unsigned short USHORT, *PUSHORT, CSHORT;
+-typedef unsigned short WORD, WCHAR, *PWSTR;
++typedef unsigned short WORD, WCHAR, *LPWSTR, *PWSTR;
+ typedef unsigned int UINT, *PUINT, *LPUINT;
+ typedef unsigned long DWORD, *PDWORD, *LPDWORD;
+ typedef unsigned long ULONG, *PULONG;
+diff --git a/lib/xboxrt/Makefile b/lib/xboxrt/Makefile
+index 90a4315..b1a9ec1 100644
+--- a/lib/xboxrt/Makefile
++++ b/lib/xboxrt/Makefile
+@@ -25,7 +25,9 @@ XBOXRT_SRCS := \
+ 	$(NXDK_DIR)/lib/xboxrt/vcruntime/vcruntime_exception.cpp \
+ 	$(NXDK_DIR)/lib/xboxrt/vcruntime/vcruntime_typeinfo.cpp \
+ 	$(NXDK_DIR)/lib/xboxrt/vcruntime/eh.cpp \
+-	$(NXDK_DIR)/lib/xboxrt/vcruntime/excpt.cpp
++	$(NXDK_DIR)/lib/xboxrt/vcruntime/excpt.cpp \
++	$(NXDK_DIR)/lib/xboxrt/vcruntime/framehandler.s \
++	$(NXDK_DIR)/lib/xboxrt/vcruntime/rtti.cpp
+ 
+ XBOXRT_OBJS = $(addsuffix .obj, $(basename $(XBOXRT_SRCS)))
+ 
+diff --git a/lib/xboxrt/libc_extensions/stdlib_ext_.c b/lib/xboxrt/libc_extensions/stdlib_ext_.c
+index e07f0f6..72fd02d 100644
+--- a/lib/xboxrt/libc_extensions/stdlib_ext_.c
++++ b/lib/xboxrt/libc_extensions/stdlib_ext_.c
+@@ -85,25 +85,6 @@ unsigned __int64 _byteswap_uint64 (unsigned __int64 val)
+     return __builtin_bswap64(val);
+ }
+ 
+-
+-double strtod( const char * _PDCLIB_restrict nptr, char * * _PDCLIB_restrict endptr )
+-{
+-    assert(0);
+-    return 0.0;
+-}
+-
+-float strtof( const char * _PDCLIB_restrict nptr, char * * _PDCLIB_restrict endptr )
+-{
+-    assert(0);
+-    return 0.0;
+-}
+-
+-long double strtold( const char * _PDCLIB_restrict nptr, char * * _PDCLIB_restrict endptr )
+-{
+-    assert(0);
+-    return 0.0;
+-}
+-
+ int mbtowc (wchar_t *pwc, const char *string, size_t n)
+ {
+     assert(0);
+diff --git a/lib/xboxrt/vcruntime/eh.cpp b/lib/xboxrt/vcruntime/eh.cpp
+index b4fe985..8e56fa5 100644
+--- a/lib/xboxrt/vcruntime/eh.cpp
++++ b/lib/xboxrt/vcruntime/eh.cpp
+@@ -1,74 +1,94 @@
+ // SPDX-License-Identifier: MIT
+ 
+-// SPDX-FileCopyrightText: 2020 Stefan Schmidt
++// SPDX-FileCopyrightText: 2020-2024 Stefan Schmidt
+ 
+ #include <assert.h>
++#include <stdlib.h>
+ #include <eh.h>
+ 
+ void __cdecl __ExceptionPtrCreate (void*)
+ {
+-    assert(0);
++    // assert(0);
+ }
+ 
+ void __cdecl __ExceptionPtrDestroy (void*)
+ {
+-    assert(0);
++    // assert(0);
+ }
+ 
+ void __cdecl __ExceptionPtrCopy (void*, const void*)
+ {
+-    assert(0);
++    // assert(0);
+ }
+ 
+ void __cdecl __ExceptionPtrAssign (void*, const void*)
+ {
+-    assert(0);
++    // assert(0);
+ }
+ 
+ bool __cdecl __ExceptionPtrCompare (const void*, const void*)
+ {
+-    assert(0);
+-    return false;
++    // assert(0);
++    return true;
+ }
+ 
+ bool __cdecl __ExceptionPtrToBool (const void*)
+ {
+-    assert(0);
+-    return false;
++    // assert(0);
++    return true;
+ }
+ 
+ void __cdecl __ExceptionPtrSwap (void*, void*)
+ {
+-    assert(0);
++    // assert(0);
+ }
+ 
+ void __cdecl __ExceptionPtrCurrentException (void*)
+ {
+-    assert(0);
++    // assert(0);
+ }
+ 
+ [[noreturn]] void __cdecl __ExceptionPtrRethrow (const void*)
+ {
+-    assert(0);
++    // assert(0);
+ }
+ 
+ void __cdecl __ExceptionPtrCopyException (void*, const void*, const void*)
+ {
+-    assert(0);
++    // assert(0);
+ }
+ 
+ extern "C"
+ {
++    static thread_local terminate_handler current_terminate_handler = NULL;
++
+     terminate_handler __cdecl set_terminate (terminate_handler _NewTerminateHandler) throw()
+     {
+-        assert(0);
+-        return 0;
++        terminate_handler old_handler = current_terminate_handler;
++        current_terminate_handler = _NewTerminateHandler;
++        return old_handler;
+     }
+ 
+     terminate_handler __cdecl _get_terminate ()
+     {
++        return current_terminate_handler;
++    }
++
++    void __cdecl terminate ()
++    {
++        if (current_terminate_handler) {
++            current_terminate_handler();
++        }
++
++        // Help finding the issue when running a debug build
+         assert(0);
+-        return 0;
++
++        abort();
++    }
++
++    void __cdecl __std_terminate ()
++    {
++        terminate();
+     }
+ 
+     unexpected_handler __cdecl set_unexpected (unexpected_handler _NewUnexpectedHandler) throw()
+diff --git a/lib/xboxrt/vcruntime/eh.h b/lib/xboxrt/vcruntime/eh.h
+index 60b78b9..81c2245 100644
+--- a/lib/xboxrt/vcruntime/eh.h
++++ b/lib/xboxrt/vcruntime/eh.h
+@@ -10,6 +10,7 @@ extern "C"
+     typedef void (__cdecl *terminate_handler)();
+     terminate_handler __cdecl set_terminate (terminate_handler _NewTerminateHandler) throw();
+     terminate_handler __cdecl _get_terminate ();
++    void __cdecl terminate ();
+ 
+     typedef void (__cdecl *unexpected_handler)();
+     unexpected_handler __cdecl set_unexpected (unexpected_handler _NewUnexpectedHandler) throw();
+diff --git a/lib/xboxrt/vcruntime/excpt.cpp b/lib/xboxrt/vcruntime/excpt.cpp
+index ea84bb9..13aa1ae 100644
+--- a/lib/xboxrt/vcruntime/excpt.cpp
++++ b/lib/xboxrt/vcruntime/excpt.cpp
+@@ -1,10 +1,13 @@
+ // SPDX-License-Identifier: MIT
+ 
+-// SPDX-FileCopyrightText: 2020-2023 Stefan Schmidt
++// SPDX-FileCopyrightText: 2020-2024 Stefan Schmidt
+ // SPDX-FileCopyrightText: 2021 Lucas Jansson
+ 
++#include <assert.h>
+ #include <excpt.h>
++#include <excpt_cxx.hpp>
+ #include <eh.h>
++#include <string.h>
+ #include <xboxkrnl/xboxkrnl.h>
+ 
+ struct ScopeTableEntry
+@@ -177,3 +180,296 @@ extern "C" int _except_handler3 (_EXCEPTION_RECORD *pExceptionRecord, EXCEPTION_
+     // No filter in this frame accepted the exception, continue searching
+     return DISPOSITION_CONTINUE_SEARCH;
+ }
++
++
++#define MAGIC_VC  0x19930520 // up to VC6
++#define MAGIC_VC7 0x19930521 // VC7.x(2002-2003)
++#define MAGIC_VC8 0x19930522 // VC8 (2005)
++
++#define CXX_EXCEPTION 0xE06D7363
++
++/*__declspec(noreturn)*/ extern "C" void __stdcall _CxxThrowException (void *pExceptionObject, _ThrowInfo *pThrowInfo)
++{
++    EXCEPTION_RECORD exceptionRecord;
++    exceptionRecord.ExceptionCode = CXX_EXCEPTION;
++    exceptionRecord.ExceptionRecord = nullptr;
++    exceptionRecord.ExceptionAddress = (PVOID)_CxxThrowException;
++    exceptionRecord.ExceptionFlags = EXCEPTION_NONCONTINUABLE;
++    exceptionRecord.NumberParameters = 3;
++    exceptionRecord.ExceptionInformation[0] = MAGIC_VC8;
++    exceptionRecord.ExceptionInformation[1] = (ULONG_PTR)pExceptionObject;
++    exceptionRecord.ExceptionInformation[2] = (ULONG_PTR)pThrowInfo;
++    RtlRaiseException(&exceptionRecord);
++}
++
++struct EXCEPTION_REGISTRATION_CXX : EXCEPTION_REGISTRATION
++{
++    DWORD id;
++    DWORD _ebp;
++};
++
++
++/**
++ * Checks all catch blocks of a given try block to find one that can catch the
++ * exception. If a match is found, a pointer to the catch block is returned,
++ * along with a pointer to the type the exception was caught as.
++ * @param catchableType A pointer to a pointer that will receive the address of the type the exception was caught as. Will be NULL for catch(...) blocks
++ * @param tryBlock The try block map entry that will get checked
++ * @param throwInfo The exception type info
++ * @return A pointer to the catch block that caught the exception, NULL if no block caught it
++ */
++static HandlerType *getCatchBlock (CatchableType **catchableType, TryBlockMapEntry *tryBlock, _ThrowInfo *throwInfo)
++{
++    assert(catchableType);
++    assert(tryBlock);
++    assert(throwInfo);
++
++    for (int i = 0; i < tryBlock->nCatches; i++) {
++        HandlerType *const catchBlock = &tryBlock->pHandlerArray[i];
++
++        // catch(...) aka catch-all block, accepts all exception types
++        if (!catchBlock->pType) {
++            *catchableType = nullptr;
++            return catchBlock;
++        }
++
++        for (int j = 0; j < throwInfo->pCatchableTypeArray->nCatchableTypes; j++) {
++            CatchableType *const type = throwInfo->pCatchableTypeArray->arrayOfCatchableTypes[j];
++
++            assert(type->pType);
++            assert(catchBlock->pType);
++
++            // Try direct pointer comparison for speed, if it fails, fall back to mangled name string comparison
++            if (type->pType != catchBlock->pType) {
++                if (strcmp(type->pType->name, catchBlock->pType->name) != 0) {
++                    continue;
++                }
++            }
++
++            // const or volatile exceptions need a catch block with the same property, reverse would be fine
++            if ((throwInfo->attributes & TYPE_FLAG_CONST) && !(catchBlock->adjectives & TYPE_FLAG_CONST)) continue;
++            if ((throwInfo->attributes & TYPE_FLAG_VOLATILE) && !(catchBlock->adjectives & TYPE_FLAG_VOLATILE)) continue;
++
++            *catchableType = type;
++            return catchBlock;
++        }
++    }
++
++    return nullptr;
++}
++
++static int RethrowFilter (EXCEPTION_POINTERS *p)
++{
++    PEXCEPTION_RECORD er = p->ExceptionRecord;
++
++    if (er->ExceptionCode == CXX_EXCEPTION
++        && er->NumberParameters == 3
++        && (er->ExceptionInformation[0] == MAGIC_VC
++            || er->ExceptionInformation[0] == MAGIC_VC7
++            || er->ExceptionInformation[0] == MAGIC_VC8)) {
++        if (er->ExceptionInformation[1] == 0 && er->ExceptionInformation[2] == 0) {
++            // Simple re-throw
++            return EXCEPTION_EXECUTE_HANDLER;
++        }
++        // A different C++ exception was thrown
++    }
++
++    return EXCEPTION_CONTINUE_SEARCH;
++}
++
++static void *call_catch_block(void *func, void *_ebp, EXCEPTION_REGISTRATION_CXX *pRN, FuncInfo *functionInfo)
++{
++    DWORD save_esp = ((DWORD*)pRN)[-1];
++    void *continue_addr;
++
++    __try {
++        __try {
++            continue_addr = call_ebp_func(func, _ebp);
++        } __except (RethrowFilter((EXCEPTION_POINTERS *)_exception_info())) {
++            continue_addr = nullptr;
++        }
++        // FIXME: Should we intercept and handle other throws here, too?
++    } __finally {
++        ((DWORD*)pRN)[-1] = save_esp;
++    }
++
++    ((DWORD*)pRN)[-1] = save_esp;
++
++    return continue_addr;
++}
++
++static inline void continue_after_catch (EXCEPTION_REGISTRATION_CXX *frame, void *addr)
++{
++    asm volatile (
++        "movl -4(%0), %%esp;"
++        "leal 12(%0), %%ebp;"
++        "jmp *%1;"
++        : : "r"(frame), "a"(addr)
++    );
++}
++
++static inline void *get_this_ptr (void *objptr, CatchableType *type)
++{
++    if (!objptr) return nullptr;
++    assert(type);
++
++    const PMD *pmd = &type->thisDisplacement;
++    char *ptr = (char *)objptr;
++
++    ptr += pmd->mdisp;
++    if (pmd->pdisp != -1) {
++        char *vbtable = ptr + pmd->pdisp;
++        ptr += *(int*)(vbtable + pmd->vdisp);
++    }
++
++    ptr = (char *)objptr;
++
++    if (pmd->pdisp >= 0) {
++        int *offset_ptr;
++        ptr += pmd->pdisp;
++        offset_ptr = (int *)(*(char **)ptr + pmd->vdisp);
++        ptr += *offset_ptr;
++    }
++    ptr += pmd->mdisp;
++
++    return ptr;
++}
++
++static inline void call_copy_function (void *func, void *thisptr, void *exceptionObject)
++{
++    // Call copy constructor with thiscall calling convention
++    asm volatile (
++        "pushl $1;"
++        "pushl %1;"
++        "call *%0;"
++        "popl %1;"
++        : : "r"(func), "r"(exceptionObject), "c"(thisptr)
++        : "eax", "edx", "memory"
++    );
++}
++
++static inline void call_destructor (void *func, void *thisptr)
++{
++    // Call destructor with thiscall calling convention
++    asm volatile (
++        "call *%0;"
++        : : "r"(func), "c"(thisptr)
++        : "eax", "edx", "memory"
++    );
++}
++
++static void copy_exception_object (EXCEPTION_REGISTRATION_CXX *frame, HandlerType *catchBlock, CatchableType *catchType, void *exceptionObject)
++{
++    // FIXME: What about virtual stuff?
++    if (!catchType) return;
++
++    // The destination is an ebp-relative address, and may be different for each catch block
++    void **destination = (void **)(((DWORD)&frame->_ebp) + catchBlock->dispCatchObj);
++
++    if (catchBlock->adjectives & TYPE_FLAG_REFERENCE) {
++        *destination = get_this_ptr(exceptionObject, catchType);
++    } else if (catchType->properties & CLASS_IS_SIMPLE_TYPE) {
++        // Simple type, can be memmove()d
++        memmove(destination, exceptionObject, catchType->sizeOrOffset);
++
++        if (catchType->sizeOrOffset == sizeof(void *)) {
++            *destination = get_this_ptr(*destination, catchType);
++        }
++    } else if (catchType->copyFunction) {
++        call_copy_function((void *)catchType->copyFunction, destination, get_this_ptr(exceptionObject, catchType));
++    } else {
++        // Simple type, can be memmove()d
++        memmove(destination, get_this_ptr(exceptionObject, catchType), catchType->sizeOrOffset);
++    }
++}
++
++static void local_unwind_cxx (EXCEPTION_REGISTRATION_CXX *frame, FuncInfo *functionInfo, DWORD trylevelEnd)
++{
++    while (true)
++    {
++        DWORD currentTrylevel = frame->id;
++
++        if (currentTrylevel == trylevelEnd) {
++            break;
++        }
++
++        if (functionInfo->pUnwindMap[currentTrylevel].action) {
++            call_ebp_func((void *)functionInfo->pUnwindMap[currentTrylevel].action, &frame->_ebp);
++        }
++
++        frame->id = functionInfo->pUnwindMap[currentTrylevel].toState;
++    }
++}
++
++static void global_unwind_cxx (PEXCEPTION_RECORD pExcept, EXCEPTION_REGISTRATION_CXX *pRN)
++{
++    // This can't be a normal C function call, see _global_unwind2 for an explanation
++    asm volatile (
++        "pushl $0;"
++        "pushl %1;"
++        "pushl $0;"
++        "pushl %0;"
++        "call _RtlUnwind@16;"
++        : : "a"(pRN), "b"(pExcept) : "ecx", "edx", "esi", "edi", "ebp"
++    );
++}
++
++extern "C" int CxxFrameHandlerVC8 (PEXCEPTION_RECORD pExcept, EXCEPTION_REGISTRATION_CXX *pRN, CONTEXT *pContext, void *pDC, FuncInfo *functionInfo)
++{
++    assert(functionInfo->magicNumber == MAGIC_VC8);
++
++    // FUNC_DESCR_SYNCHRONOUS = 1
++    if (!(functionInfo->EHFlags & 1) || (pExcept->ExceptionCode != CXX_EXCEPTION)) {
++        return DISPOSITION_CONTINUE_SEARCH;
++    }
++
++    if (pExcept->ExceptionFlags & (EXCEPTION_UNWINDING | EXCEPTION_EXIT_UNWIND)) {
++        if (functionInfo->maxState != 0) {
++            local_unwind_cxx(pRN, functionInfo, -1);
++        }
++        return DISPOSITION_CONTINUE_SEARCH;
++    }
++
++    _ThrowInfo *throwInfo = (_ThrowInfo*)pExcept->ExceptionInformation[2];
++    assert(throwInfo != NULL);
++
++    for (DWORD i = 0; i < functionInfo->nTryBlocks; i++) {
++        const DWORD tryLow = functionInfo->pTryBlockMap[i].tryLow;
++        const DWORD tryHigh = functionInfo->pTryBlockMap[i].tryHigh;
++
++        if (tryLow > pRN->id) continue;
++        if (pRN->id > tryHigh) continue;
++
++        TryBlockMapEntry *tryBlock = &functionInfo->pTryBlockMap[i];
++        CatchableType *catchType;
++        HandlerType *catchBlock = getCatchBlock(&catchType, tryBlock, throwInfo);
++
++        if (!catchBlock) continue;
++
++        // Copy the exception object to the memory reserved by the catch block, needs to happen before unwinding
++        copy_exception_object(pRN, catchBlock, catchType, (void *)pExcept->ExceptionInformation[1]);
++
++        // First global unwinding, then local unwinding
++        global_unwind_cxx(pExcept, pRN);
++        local_unwind_cxx(pRN, functionInfo, tryBlock->tryLow);
++        pRN->id = tryBlock->tryHigh + 1;
++        void *continue_addr = call_catch_block(catchBlock->addressOfHandler, &pRN->_ebp, pRN, functionInfo);
++
++        // TODO: Check correctness
++        if (!continue_addr) {
++            continue;
++        }
++
++        // Destroy exception object, if necessary
++        if (throwInfo->pmfnUnwind) {
++            void *objaddr = (void *)(((DWORD)&pRN->_ebp) + catchBlock->dispCatchObj);
++            call_destructor((void *)throwInfo->pmfnUnwind, objaddr);
++        }
++
++        // Resume normal execution after the catch block
++        continue_after_catch(pRN, continue_addr);
++    }
++
++    // No matching catch block in this frame
++    return DISPOSITION_CONTINUE_SEARCH;
++}
+diff --git a/lib/xboxrt/vcruntime/excpt_cxx.hpp b/lib/xboxrt/vcruntime/excpt_cxx.hpp
+new file mode 100644
+index 0000000..4056225
+--- /dev/null
++++ b/lib/xboxrt/vcruntime/excpt_cxx.hpp
+@@ -0,0 +1,91 @@
++#ifndef __VCRUNTIME_EXCPT_CXX_H__
++#define __VCRUNTIME_EXCPT_CXX_H__
++
++#include <excpt.h>
++
++struct TypeDescriptor
++{
++    const void *pVFTable;
++    void *spare;
++    char name[0];
++};
++
++struct UnwindMapEntry
++{
++    int toState;
++    void (*action)();
++};
++
++struct HandlerType
++{
++    DWORD adjectives;
++    TypeDescriptor *pType;
++    int dispCatchObj; // ebp-relative offset to the memory reserved for the exception object
++    void *addressOfHandler;
++};
++#define TYPE_FLAG_CONST 1
++#define TYPE_FLAG_VOLATILE 2
++#define TYPE_FLAG_REFERENCE 8
++
++struct TryBlockMapEntry
++{
++    int tryLow;
++    int tryHigh;
++    int catchHigh;
++    int nCatches;
++    HandlerType *pHandlerArray;
++};
++
++struct ESTypeList
++{
++    int nCount;
++    HandlerType *pTypeArray;
++};
++
++struct FuncInfo
++{
++    DWORD magicNumber;
++    int maxState;
++    UnwindMapEntry *pUnwindMap;
++    DWORD nTryBlocks;
++    TryBlockMapEntry *pTryBlockMap;
++    DWORD nIPMapEntries;
++    void *pIPtoStateMap;
++    ESTypeList *pESTypeList;
++    int EHFlags;
++};
++
++struct PMD
++{
++    int mdisp; // member offset
++    int pdisp; // offset of the vbtable
++    int vdisp; // offset to the displacement value inside the vbtable
++};
++
++struct CatchableType
++{
++    DWORD properties; // 0x01: simple type, can be copied by memmove, 0x02: can be caught by reference only, 0x04: has virtual bases
++    TypeDescriptor *pType;
++    PMD thisDisplacement;
++    int sizeOrOffset;
++    void (*copyFunction)(); // copy constructor address (0 = trivially copyable)
++};
++#define CLASS_IS_SIMPLE_TYPE 1
++#define CLASS_HAS_VIRTUAL_BASE 4
++
++struct CatchableTypeArray
++{
++    int nCatchableTypes;
++    CatchableType *arrayOfCatchableTypes[0];
++};
++
++struct _ThrowInfo
++{
++
++    DWORD attributes; // 0x01: const, 0x02: volatile
++    void (*pmfnUnwind)(); // exception destructor
++    int (*pForwardCompat)(); // forward compatibility handler
++    CatchableTypeArray *pCatchableTypeArray;
++};
++
++#endif
+diff --git a/lib/xboxrt/vcruntime/framehandler.s b/lib/xboxrt/vcruntime/framehandler.s
+new file mode 100644
+index 0000000..0f645ec
+--- /dev/null
++++ b/lib/xboxrt/vcruntime/framehandler.s
+@@ -0,0 +1,19 @@
++// SPDX-License-Identifier: MIT
++
++// SPDX-FileCopyrightText: 2024 Stefan Schmidt
++
++.include "prelude.s.inc"
++safeseh_prelude
++
++// int __cdecl __CxxFrameHandler3 (PEXCEPTION_RECORD, PEXCEPTION_REGISTRATION, _CONTEXT *, void *);
++// Additionally, a function information table is passed in the eax register
++.globl ___CxxFrameHandler3
++___CxxFrameHandler3:
++    pushl %eax
++    pushl 20(%esp)
++    pushl 20(%esp)
++    pushl 20(%esp)
++    pushl 20(%esp)
++    call _CxxFrameHandlerVC8
++    addl $20, %esp
++    retl
+diff --git a/lib/xboxrt/vcruntime/rtti.cpp b/lib/xboxrt/vcruntime/rtti.cpp
+new file mode 100644
+index 0000000..d4dd0dc
+--- /dev/null
++++ b/lib/xboxrt/vcruntime/rtti.cpp
+@@ -0,0 +1,386 @@
++// SPDX-License-Identifier: MIT
++
++// SPDX-FileCopyrightText: 2024 Stefan Schmidt
++
++#include <excpt_cxx.hpp>
++#include <string.h>
++#include <vcruntime_typeinfo.h>
++#include <windef.h>
++
++// LLVM seems to have issues resolving runtime functions that are pulled in by
++// other runtime functions, so we manually force inclusion
++#pragma comment(linker, "/include:__CxxThrowException@8")
++
++struct RTTIClassHierarchyDescriptor;
++
++/**
++ * Descriptor for a base class in an object's inheritance hierarchy
++*/
++struct RTTIBaseClassDescriptor
++{
++    /// RTTI Type Descriptor for this class
++    TypeDescriptor *pTypeDescriptor;
++
++    /// Specifies how many base classes this class has. This counts both
++    /// directly and indirectly inherited bases.
++    DWORD numContainedBases;
++
++    PMD where;
++
++    /// Attributes, such as whether the inheritance type is private/protected
++    DWORD attributes;
++
++    /// Optional, check for existence with BCD_HASPCHD attribute before access
++    RTTIClassHierarchyDescriptor *pClassDescriptor;
++};
++
++#define BCD_NOTVISIBLE 0x00000001
++#define BCD_AMBIGUOUS 0x00000002
++#define BCD_PRIVORPROTBASE 0x00000004
++#define BCD_HASPCHD 0x00000040
++
++struct RTTIBaseClassArray
++{
++    /// The array of Base Class Descriptors of all base classes of the type,
++    /// sorted left-to-right and depth-first.
++    RTTIBaseClassDescriptor *arrayOfBaseClassDescriptors[];
++};
++
++/**
++ * Describes the inheritance hierarchy of a C++ class
++*/
++struct RTTIClassHierarchyDescriptor
++{
++    /// Always zero?
++    DWORD signature;
++
++    /// Whether it's single, multiple or even virtual inheritance
++    DWORD attributes;
++
++    /// Number of elements in pBaseClassArray
++    DWORD numBaseClasses;
++
++    /// Struct that contains the array of base classes
++    RTTIBaseClassArray *pBaseClassArray;
++};
++
++#define CHD_MULTINH 0x00000001
++#define CHD_VIRTINH 0x00000002
++
++struct RTTICompleteObjectLocator
++{
++    /// Always zero?
++    DWORD signature;
++
++    /// The offset of this object within the complete object
++    DWORD offset;
++
++    DWORD cdOffset;
++
++    /// The object's type descriptor, for type and type name comparison
++    TypeDescriptor *pTypeDescriptor;
++
++    RTTIClassHierarchyDescriptor *pClassDescriptor;
++};
++
++/**
++ * Simple helper to turn a polymorphic object pointer into a vftable pointer
++ * @param objptr Pointer to a polymorphic object
++ * @return Pointer to the vftable (DWORD array)
++*/
++static const DWORD *get_vftable (void *objptr) {
++    return *static_cast<const DWORD **>(objptr);
++}
++
++/**
++ * Simple helper to obtain the complete object locator pointer of a polymorphic object
++ * @param objptr Pointer to a polymorphic object
++ * @return Pointer to the RTTICompleteObjectLocator of the object
++*/
++static const RTTICompleteObjectLocator *getobjlocator (void *objptr) {
++    const DWORD *vftable = get_vftable(objptr);
++    return reinterpret_cast<const RTTICompleteObjectLocator *>(vftable[-1]);
++}
++
++/**
++ * Runtime function to implement casting a polymorphic object to a void pointer
++ * dynamic_cast<void *>(obj_ptr)
++ * @param objptr A pointer to a polymorphic object
++ * @return nullptr if objptr was null, otherwise the true start address of the object
++*/
++extern "C" __cdecl PVOID __RTCastToVoid (PVOID objptr) {
++    if (objptr == nullptr) {
++        return nullptr;
++    }
++
++    __try {
++        const RTTICompleteObjectLocator *objlocator = getobjlocator(objptr);
++        return static_cast<char *>(objptr) - objlocator->offset;
++    } __except (GetExceptionCode() == EXCEPTION_ACCESS_VIOLATION ? EXCEPTION_EXECUTE_HANDLER : EXCEPTION_CONTINUE_SEARCH) {
++        throw std::__non_rtti_object::__construct_from_string_literal("Access violation - no RTTI data!");
++    }
++
++}
++#include <hal/debug.h>
++
++/**
++ * Helper to find the base class descriptor of the target class in an object's
++ * inheritance chain, if it exists. Also ensures that the inheritance type
++ * between source and target class allows casting.
++ * @param obj_locator Complete object locator of the object which is being cast
++ * @param source_type Type descriptor of the source class
++ * @param target_type Type descriptor of the target class
++ * @return nullptr if the cast fails, else Base Class Descriptor of the target class
++*/
++const RTTIBaseClassDescriptor *get_target_type_si (const RTTICompleteObjectLocator *obj_locator, const TypeDescriptor *source_type, const TypeDescriptor *target_type)
++{
++    // Search for the base class by comparing TypeDescriptor-pointers. In the
++    // single image case, which is the norm on the Xbox, this will be enough,
++    // and it's cheaper than comparing the decorated names.
++    for (DWORD i = 0; i < obj_locator->pClassDescriptor->numBaseClasses; i++) {
++        const RTTIBaseClassDescriptor *target_bcd_candidate = obj_locator->pClassDescriptor->pBaseClassArray->arrayOfBaseClassDescriptors[i];
++        const TypeDescriptor *target_descriptor_candidate = target_bcd_candidate->pTypeDescriptor;
++
++        if (target_descriptor_candidate == target_type) {
++            // Target type found, but we have to keep searching for the source type,
++            // and make sure there's no non-public inheritance going on, or we fail.
++            // In the single-inheritance case, base classes are simply sorted
++            // from bottom to top, so the source type comes after the target type.
++
++            for (DWORD j = i + 1; j < obj_locator->pClassDescriptor->numBaseClasses; j++) {
++                const RTTIBaseClassDescriptor *source_bcd_candidate = obj_locator->pClassDescriptor->pBaseClassArray->arrayOfBaseClassDescriptors[j];
++
++                if ((source_bcd_candidate->attributes & BCD_PRIVORPROTBASE) != 0) {
++                    // Downcasting "through" protected or private inheritance is not allowed
++                    return nullptr;
++                }
++
++                const TypeDescriptor *src_descriptor_candidate = source_bcd_candidate->pTypeDescriptor;
++                if (src_descriptor_candidate == source_type) {
++                    // Source type found, cast is valid
++                    return target_bcd_candidate;
++                }
++            }
++
++            // Source type not found in inheritance hierarchy
++            return nullptr;
++        }
++    }
++
++    // If the fast search didn't succeed, we check again, with a
++    // computationally more expensive full decorated name comparison
++    for (DWORD i = 0; i < obj_locator->pClassDescriptor->numBaseClasses; i++) {
++        const RTTIBaseClassDescriptor *target_bcd_candidate = obj_locator->pClassDescriptor->pBaseClassArray->arrayOfBaseClassDescriptors[i];
++        const TypeDescriptor *target_descriptor_candidate = target_bcd_candidate->pTypeDescriptor;
++
++        if (strcmp(target_descriptor_candidate->name, target_type->name) == 0) {
++            // Target type found, but we have to keep searching for the source type,
++            // and make sure there's no non-public inheritance going on, or we fail.
++            // In the single-inheritance case, base classes are simply sorted
++            // from bottom to top, so the source type comes after the target type.
++
++            for (DWORD j = i + 1; j < obj_locator->pClassDescriptor->numBaseClasses; j++) {
++                const RTTIBaseClassDescriptor *source_bcd_candidate = obj_locator->pClassDescriptor->pBaseClassArray->arrayOfBaseClassDescriptors[j];
++
++                if ((source_bcd_candidate->attributes & BCD_PRIVORPROTBASE) != 0) {
++                    // Downcasting "through" protected or private inheritance is not allowed
++                    return nullptr;
++                }
++
++                const TypeDescriptor *src_descriptor_candidate = source_bcd_candidate->pTypeDescriptor;
++                if (strcmp(src_descriptor_candidate->name, source_type->name) == 0) {
++                    // Source type found, cast is valid
++                    return target_bcd_candidate;
++                }
++            }
++
++            // Source type not found in inheritance hierarchy
++            return nullptr;
++        }
++    }
++
++    // Both searches found no base class descriptor for the target
++    return nullptr;
++}
++
++const RTTIBaseClassDescriptor *get_target_type_mi (const RTTICompleteObjectLocator *obj_locator, const TypeDescriptor *source_type, const TypeDescriptor *target_type)
++{
++    DWORD target_num_bases = 0;
++    DWORD target_index = -1;
++
++    const RTTIBaseClassDescriptor *found_source_bcd = nullptr;
++    const RTTIBaseClassDescriptor *found_target_bcd = nullptr;
++
++    for (DWORD i = 0; i < obj_locator->pClassDescriptor->numBaseClasses; i++) {
++        const RTTIBaseClassDescriptor *bcd_candidate = obj_locator->pClassDescriptor->pBaseClassArray->arrayOfBaseClassDescriptors[i];
++        const TypeDescriptor *td_candidate = bcd_candidate->pTypeDescriptor;
++
++        // Trick to skip RTTI checks for base classes in the list that are
++        // bases of the target
++        if (i - target_index > target_num_bases) {
++            if ((td_candidate == target_type) || (strcmp(td_candidate->name, target_type->name) == 0)) {
++                // If the Base Class Descriptor of the source was already
++                // found, that means we have either a cross-cast or an
++                // up-cast, and we're done right now
++                if (found_source_bcd != nullptr) {
++                    // Check if the found base classes are unreachable
++                    if ((bcd_candidate->attributes & (BCD_NOTVISIBLE | BCD_AMBIGUOUS)) != 0) {
++                        return nullptr;
++                    }
++                    if ((found_source_bcd->attributes & BCD_NOTVISIBLE) != 0) {
++                        return nullptr;
++                    }
++
++                    return bcd_candidate;
++                }
++
++                found_target_bcd = bcd_candidate;
++                target_index = i;
++                target_num_bases = bcd_candidate->numContainedBases;
++            }
++        }
++
++        if ((td_candidate == source_type) || (strcmp(td_candidate->name, source_type->name) == 0)) {
++            // No target Base Class Descriptor found yet? Remember source BCD
++            // and keep searching
++            if (found_target_bcd == nullptr) {
++                found_source_bcd = bcd_candidate;
++                continue;
++            }
++
++            if (i - target_index <= target_num_bases) {
++                // Index inside the target's base class interval, so
++                // it's a down-cast
++
++                // FIXME: comments
++                if ((found_target_bcd->attributes & BCD_HASPCHD) == 0) {
++                    if ((target_index == 0) && ((bcd_candidate->attributes & BCD_NOTVISIBLE) != 0)) {
++                        return nullptr;
++                    } else {
++                        return found_target_bcd;
++                    }
++                }
++
++                const RTTIBaseClassDescriptor *source_bcd_in_target = found_target_bcd->pClassDescriptor->pBaseClassArray->arrayOfBaseClassDescriptors[i - target_index];
++                if ((source_bcd_in_target->attributes & BCD_NOTVISIBLE) != 0) {
++                    return nullptr;
++                } else {
++                    return found_target_bcd;
++                }
++            } else {
++                // Cross-cast or up-cast
++                if ((found_target_bcd->attributes & (BCD_NOTVISIBLE | BCD_AMBIGUOUS)) != 0) {
++                    return nullptr;
++                }
++                if ((bcd_candidate->attributes & BCD_NOTVISIBLE) != 0) {
++                    return nullptr;
++                }
++
++                return found_target_bcd;
++            }
++        }
++    }
++
++    // We never found fitting source and target Base Class Descriptors, so
++    // the cast fails
++    return nullptr;
++}
++
++const RTTIBaseClassDescriptor *get_target_type_vi (const RTTICompleteObjectLocator *obj_locator, const TypeDescriptor *source_type, const TypeDescriptor *target_type)
++{
++    // Virtual inheritance uses the same algorithm as multiple inheritance,
++    // since the MSVC RTTI structure already encodes virtual inheritance information
++    // in the base class descriptors and attributes
++    return get_target_type_mi(obj_locator, source_type, target_type);
++}
++
++
++static void *get_complete_obj_ptr (void *objptr);
++static ptrdiff_t pmd_to_offset (const void *this_ptr, const PMD *pmd);
++
++/**
++ *
++ * @param inptr Pointer to a polymorphic object
++ * @param VfDelta Offset of virtual function pointer in object
++ * @param SrcType Static type of object pointed to by the inptr parameter
++ * @param TargetType Intended result of cast
++ * @param isReference true if input is reference, else if input is pointer
++*/
++extern "C" __cdecl PVOID __RTDynamicCast (PVOID inptr, LONG VfDelta, PVOID SrcType, PVOID TargetType, BOOL isReference) throw (...)
++{
++    if (inptr == nullptr) {
++        return nullptr;
++    }
++
++    __try {
++        const RTTIBaseClassDescriptor *new_type;
++        const RTTICompleteObjectLocator *objlocator = getobjlocator(inptr);
++        const DWORD inheritance_attributes = objlocator->pClassDescriptor->attributes;
++
++        const TypeDescriptor *src_type = reinterpret_cast<TypeDescriptor *>(SrcType);
++        const TypeDescriptor *target_type = reinterpret_cast<TypeDescriptor *>(TargetType);
++
++        if ((inheritance_attributes & CHD_MULTINH) == 0) {
++            // Single inheritance
++            new_type = get_target_type_si(objlocator, src_type, target_type);
++        } else if ((inheritance_attributes & CHD_VIRTINH) == 0) {
++            // Multiple non-virtual inheritance
++            new_type = get_target_type_mi(objlocator, src_type, target_type);
++        } else {
++            // Virtual inheritance
++            new_type = get_target_type_vi(objlocator, src_type, target_type);
++        }
++
++
++        // If cast fails
++        if (new_type == nullptr) {
++            if (isReference) {
++                throw std::bad_cast();
++            }
++
++            return nullptr;
++        }
++
++        // - get complete object pointer
++        // - add PMD offset
++        auto complete_obj_ptr = get_complete_obj_ptr(inptr);
++        return reinterpret_cast<void *>(reinterpret_cast<uintptr_t>(complete_obj_ptr) + pmd_to_offset(complete_obj_ptr, &new_type->where));
++
++        // FIXME: Convert and return
++    } __except (GetExceptionCode() == EXCEPTION_ACCESS_VIOLATION ? EXCEPTION_EXECUTE_HANDLER : EXCEPTION_CONTINUE_SEARCH) {
++        throw std::__non_rtti_object::__construct_from_string_literal("Access violation - no RTTI data!");
++    }
++}
++
++static void *get_complete_obj_ptr (void *objptr)
++{
++    const RTTICompleteObjectLocator *objlocator = getobjlocator(objptr);
++    return static_cast<char *>(objptr) - objlocator->offset;
++}
++
++static ptrdiff_t pmd_to_offset (const void *this_ptr, const PMD *pmd)
++{
++    ptrdiff_t offset = 0;
++
++    if (pmd->pdisp >= 0) {
++        offset = pmd->pdisp;
++        offset += *(uint32_t *)((char *)*(ptrdiff_t *)((char *)this_ptr + offset) + pmd->vdisp);
++    }
++
++    offset += pmd->mdisp;
++    return offset;
++}
++
++extern "C" __cdecl PVOID __RTtypeid (PVOID objptr) throw (...)
++{
++    if (objptr == nullptr) {
++        throw std::bad_typeid();
++    }
++
++    __try {
++        const RTTICompleteObjectLocator *objlocator = getobjlocator(objptr);
++        return static_cast<void *>(objlocator->pTypeDescriptor);
++    } __except (GetExceptionCode() == EXCEPTION_ACCESS_VIOLATION ? EXCEPTION_EXECUTE_HANDLER : EXCEPTION_CONTINUE_SEARCH) {
++        throw std::__non_rtti_object::__construct_from_string_literal("Access violation - no RTTI data!");
++    }
++}
+diff --git a/lib/xboxrt/vcruntime/vcruntime_exception.h b/lib/xboxrt/vcruntime/vcruntime_exception.h
+index a0e182d..62270d1 100644
+--- a/lib/xboxrt/vcruntime/vcruntime_exception.h
++++ b/lib/xboxrt/vcruntime/vcruntime_exception.h
+@@ -1,10 +1,12 @@
+ // SPDX-License-Identifier: MIT
+ 
+-// SPDX-FileCopyrightText: 2019 Stefan Schmidt
++// SPDX-FileCopyrightText: 2019-2024 Stefan Schmidt
+ 
+ #ifndef __VCRUNTIME_EXCEPTION_H__
+ #define __VCRUNTIME_EXCEPTION_H__
+ 
++#include <stddef.h>
++
+ struct __std_exception_data
+ {
+     const char *_What;
+diff --git a/lib/xboxrt/vcruntime/vcruntime_typeinfo.h b/lib/xboxrt/vcruntime/vcruntime_typeinfo.h
+index bc6df2b..0200595 100644
+--- a/lib/xboxrt/vcruntime/vcruntime_typeinfo.h
++++ b/lib/xboxrt/vcruntime/vcruntime_typeinfo.h
+@@ -1,6 +1,6 @@
+ // SPDX-License-Identifier: MIT
+ 
+-// SPDX-FileCopyrightText: 2019-2020 Stefan Schmidt
++// SPDX-FileCopyrightText: 2019-2024 Stefan Schmidt
+ 
+ #ifndef __VCRUNTIME_TYPEINFO_H__
+ #define __VCRUNTIME_TYPEINFO_H__
+@@ -27,9 +27,8 @@ public:
+ 
+     const char *name () const noexcept
+     {
+-        // FIXME: return human-readable name
+-        assert(false);
+-        return NULL;
++        // For now return raw_name until we have something better
++        return raw_name();
+     }
+ 
+     const char *raw_name () const noexcept
+@@ -86,6 +85,24 @@ namespace std
+         bad_typeid () noexcept : exception("bad typeid", 0)
+         {
+         }
++    private:
++        friend class __non_rtti_object;
++
++        bad_typeid (const char *const _Message, [[maybe_unused]] int) noexcept : exception(_Message, 0)
++        {
++        }
++    };
++
++    class __non_rtti_object : public bad_typeid {
++    public:
++        static __non_rtti_object __construct_from_string_literal (const char *const _Message) noexcept
++        {
++            return __non_rtti_object(_Message, 0);
++        }
++    private:
++        __non_rtti_object (const char *const _Message, [[maybe_unused]] int) noexcept : bad_typeid(_Message, 0)
++        {
++        }
+     };
+ }
+ 
+diff --git a/lib/zlib/Makefile b/lib/zlib/Makefile
+index d09f042..c0ca01b 100644
+--- a/lib/zlib/Makefile
++++ b/lib/zlib/Makefile
+@@ -1,5 +1,6 @@
+ ZLIB_DIR = $(NXDK_DIR)/lib/zlib/zlib
+-ZLIB_SRCS = $(ZLIB_DIR)/adler32.c \
++ZLIB_SRCS = $(ZLIB_DIR)/compress.c \
++            $(ZLIB_DIR)/adler32.c \
+             $(ZLIB_DIR)/crc32.c \
+             $(ZLIB_DIR)/deflate.c \
+             $(ZLIB_DIR)/infback.c \
+@@ -7,6 +8,7 @@ ZLIB_SRCS = $(ZLIB_DIR)/adler32.c \
+             $(ZLIB_DIR)/inflate.c \
+             $(ZLIB_DIR)/inftrees.c \
+             $(ZLIB_DIR)/trees.c \
++            $(ZLIB_DIR)/uncompr.c \
+             $(ZLIB_DIR)/zutil.c
+ 
+ ZLIB_OBJS = $(addsuffix .obj, $(basename $(ZLIB_SRCS)))

@@ -5,11 +5,11 @@ Evidence reviewed: 2026-10-21. Target: Kodi 21.3 on a 128 MiB Xbox.
 ## Publication scope
 
 This documentation records the project intent and findings from local development.
-The toolchain patches, runtime probes, player changes and hardware logs described
-below are not included in this documentation change. Their paths identify local
-evidence to publish alongside the implementation; they are not download links
-or claims that the default branch already reproduces these results.
-Full playback controls and cleanup remain unaccepted.
+The pinned toolchain patches, runtime probes and startup diagnostics are now
+included in the repository. Experimental player changes, the SDL audio patch
+and hardware logs remain local development evidence tracked in
+[issue #2](https://github.com/ZacharyLeahan/kodi4xbox/issues/2). References to those
+paths are not download links. Full playback controls and cleanup remain unaccepted.
 
 ## Purpose and working policy
 
