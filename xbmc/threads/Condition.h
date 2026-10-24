@@ -157,7 +157,8 @@ namespace XbmcThreads
       {
         ++signals;
         wait_sem.post();
-        l.lock();
+        // The waiter needs this lock to acknowledge the signal.
+        l.unlock();
         wait_done.wait(INFINITE);
       }
     }

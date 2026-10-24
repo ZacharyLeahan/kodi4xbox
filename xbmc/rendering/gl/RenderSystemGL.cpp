@@ -30,7 +30,12 @@ CRenderSystemGL::~CRenderSystemGL() = default;
 bool CRenderSystemGL::InitRenderSystem()
 {
 #ifdef _XBOX
-  pbgl_init(GL_TRUE);
+  const int result = pbgl_init(GL_TRUE);
+  if (result != 0)
+  {
+    CLog::Log(LOGERROR, "pbgl initialization failed: {}", result);
+    return false;
+  }
 #endif
 
   m_maxTextureSize = 2048;
@@ -164,9 +169,8 @@ bool CRenderSystemGL::DestroyRenderSystem()
 {
   m_bRenderCreated = false;
 
-#ifdef _XBOX
-  pbgl_shutdown();
-#endif
+  // The Xbox window system keeps pbGL alive until GUI texture destruction
+  // has finished, then releases it in DestroyWindowSystem().
   return true;
 }
 

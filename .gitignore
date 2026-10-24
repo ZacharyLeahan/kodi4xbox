@@ -1,6 +1,8 @@
 *.obj
 *.d
 build/
+.local/
+__pycache__/
 dist/
 XBMC4Xbox.zip
 CompileInfo.cpp

@@ -1,0 +1,1749 @@
+diff --git a/functions/_PDCLIB/_PDCLIB_ftoa.c b/functions/_PDCLIB/_PDCLIB_ftoa.c
+new file mode 100644
+index 0000000..e6c24b2
+--- /dev/null
++++ b/functions/_PDCLIB/_PDCLIB_ftoa.c
+@@ -0,0 +1,344 @@
++/*
++ * (c) Marco Paland (info@paland.com)
++ * 2014-2019, PALANDesign Hannover, Germany
++ *
++ * The MIT License (MIT)
++ *
++ * Permission is hereby granted, free of charge, to any person obtaining a copy
++ * of this software and associated documentation files (the "Software"), to deal
++ * in the Software without restriction, including without limitation the rights
++ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
++ * copies of the Software, and to permit persons to whom the Software is
++ * furnished to do so, subject to the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be included in
++ * all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
++ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
++ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
++ * THE SOFTWARE.
++*/
++
++/* float -> string conversion functions from https://github.com/mpaland/printf */
++/* used for ftoa() and *printf() */
++
++#include <float.h>
++#include "pdclib/_PDCLIB_int.h"
++
++#define _PDCLIB_FTOA_MAXFLOAT 1e9
++#define _PDCLIB_FTOA_BUFSIZE 32U
++#define _PDCLIB_FTOA_DEFAULT_FLOAT_PRECISION 6U
++
++/* powers of 10 */
++static const double pow10[] = { 1, 10, 100, 1000, 10000, 100000, 1000000, 10000000, 100000000, 1000000000 };
++
++static unsigned int _out_rev( _PDCLIB_ftoa_out_fn out, struct _PDCLIB_status_t * status, int idx, const char* buf, unsigned int len, unsigned int width, unsigned int flags )
++{
++    const unsigned int start_idx = idx;
++    unsigned int i;
++
++    /* pad spaces up to given width */
++    if ( !( flags & _PDCLIB_FTOA_FLAG_LEFT ) && !( flags & _PDCLIB_FTOA_FLAG_ZEROPAD ) )
++    {
++        for ( i = len; i < width; i++, ++idx )
++            out( status, ' ' );
++    }
++
++    /* reverse string */
++    while ( len )
++    {
++        out( status, buf[--len] );
++        ++idx;
++    }
++
++    /* append pad spaces up to given width */
++    if ( flags & _PDCLIB_FTOA_FLAG_LEFT )
++    {
++        while ( idx - start_idx < width )
++        {
++            out( status, ' ' );
++            ++idx;
++        }
++    }
++
++    return idx;
++}
++
++unsigned int _PDCLIB_ftoa( _PDCLIB_ftoa_out_fn out, struct _PDCLIB_status_t * status, int idx, double value, unsigned int prec, unsigned int width, unsigned int flags )
++{
++    char buf[_PDCLIB_FTOA_BUFSIZE];
++    unsigned int len = 0U;
++    double diff = 0.0;
++    unsigned long frac;
++    int whole, negative;
++    double tmp;
++
++    /* test for special values */
++    if ( value != value )
++        return _out_rev( out, status, idx, "nan", 3, width, flags );
++    if ( value < -DBL_MAX )
++        return _out_rev( out, status, idx, "fni-", 4, width, flags );
++    if ( value > DBL_MAX )
++        return _out_rev( out, status, idx, ( flags & _PDCLIB_FTOA_FLAG_PLUS ) ? "fni+" : "fni", ( flags & _PDCLIB_FTOA_FLAG_PLUS ) ? 4U : 3U, width, flags );
++
++    // test for very large values
++    // standard printf behavior is to print EVERY whole number digit -- which could be 100s of characters overflowing your buffers == bad
++    if ( ( value > _PDCLIB_FTOA_MAXFLOAT ) || ( value < -_PDCLIB_FTOA_MAXFLOAT ) )
++    {
++        return _PDCLIB_etoa(out, status, idx, value, prec, width, flags);
++    }
++
++    /* test for negative */
++    negative = 0;
++    if ( value < 0 )
++    {
++        negative = 1;
++        value = 0 - value;
++    }
++
++    /* set default precision, if not set explicitly */
++    if ( !( flags & _PDCLIB_FTOA_FLAG_PRECISION ) )
++        prec = _PDCLIB_FTOA_DEFAULT_FLOAT_PRECISION;
++
++    /* limit precision to 9, cause a prec >= 10 can lead to overflow errors */
++    while ( ( len < _PDCLIB_FTOA_BUFSIZE ) && ( prec > 9U ) )
++    {
++        buf[len++] = '0';
++        prec--;
++    }
++
++    whole = (int)value;
++    tmp = ( value - whole ) * pow10[prec];
++    frac = (unsigned long)tmp;
++    diff = tmp - frac;
++
++    if ( diff < 0.5 )
++    {
++        /* round down */
++    }
++    else if ( diff > 0.5 )
++    {
++        /* round up */
++        ++frac;
++    }
++    else
++    {
++        /* if halfway, round up if odd OR if last digit is 0 */
++        if ( prec == 0U )
++            whole = (whole + 1) & ~1U; /* round whole to even */
++        else
++            frac = (frac + 1) & ~1U;   /* round fraction to even */
++    }
++
++    /* handle rollover, e.g. case 0.99 with prec 1 is 1.0 */
++    if ( frac >= pow10[prec] )
++    {
++        frac = 0;
++        ++whole;
++    }
++
++    if ( prec )
++    {
++        unsigned int count = prec;
++        /* now do fractional part, as an unsigned number */
++        while ( len < _PDCLIB_FTOA_BUFSIZE )
++        {
++            --count;
++            buf[len++] = (char)( 48U + ( frac % 10U ) );
++            if ( !( frac /= 10U ) ) break;
++        }
++        /* add extra 0s */
++        while ( ( len < _PDCLIB_FTOA_BUFSIZE ) && ( count-- > 0U ) )
++            buf[len++] = '0';
++        if ( len < _PDCLIB_FTOA_BUFSIZE )
++            buf[len++] = '.'; /* add decimal */
++    }
++
++    /* do whole part, number is reversed */
++    while ( len < _PDCLIB_FTOA_BUFSIZE )
++    {
++        buf[len++] = (char)( 48 + ( whole % 10 ) );
++        if ( !( whole /= 10 ) ) break;
++    }
++
++    /* pad leading zeros */
++    if ( !( flags & _PDCLIB_FTOA_FLAG_LEFT ) && ( flags & _PDCLIB_FTOA_FLAG_ZEROPAD ) )
++    {
++        if ( width && ( negative || ( flags & ( _PDCLIB_FTOA_FLAG_PLUS | _PDCLIB_FTOA_FLAG_SPACE ) ) ) )
++            width--;
++        while ( ( len < width ) && ( len < _PDCLIB_FTOA_BUFSIZE ) )
++            buf[len++] = '0';
++    }
++
++    if ( len < _PDCLIB_FTOA_BUFSIZE )
++    {
++        if ( negative )
++            buf[len++] = '-';
++        else if ( flags & _PDCLIB_FTOA_FLAG_PLUS )
++            buf[len++] = '+'; /* ignore the space if the '+' exists */
++        else if ( flags & _PDCLIB_FTOA_FLAG_SPACE )
++            buf[len++] = ' ';
++    }
++
++    return _out_rev( out, status, idx, buf, len, width, flags );
++}
++
++unsigned int _PDCLIB_etoa( _PDCLIB_ftoa_out_fn out, struct _PDCLIB_status_t * status, int idx, double value, unsigned int prec, unsigned int width, unsigned int flags )
++{
++    union
++    {
++        _PDCLIB_uint64_t U;
++        double F;
++    } conv;
++    unsigned int minwidth, fwidth, start_idx;
++    int negative, exp2, expval;
++    double z, z2;
++
++    /* check for NaN and special values */
++    if ( ( value != value ) || ( value > DBL_MAX ) || ( value < -DBL_MAX ) )
++        return _PDCLIB_ftoa(out, status, idx, value, prec, width, flags);
++
++    /* determine the sign */
++    negative = value < 0;
++    if ( negative ) value = -value;
++
++    /* default precision */
++    if ( !( flags & _PDCLIB_FTOA_FLAG_PRECISION ) )
++        prec = _PDCLIB_FTOA_DEFAULT_FLOAT_PRECISION;
++
++    /* handle zero explicitly */
++    if ( value != 0 )
++    {
++        /* determine the decimal exponent */
++        /* based on the algorithm by David Gay (https://www.ampl.com/netlib/fp/dtoa.c) */
++        conv.F = value;
++        exp2 = (int)( ( conv.U >> 52U ) & 0x07FFU ) - 1023; // effectively log2
++        conv.U = ( conv.U & ( ( 1ULL << 52U ) - 1U ) ) | ( 1023ULL << 52U ); // drop the exponent so conv.F is now in [1,2)
++        /* now approximate log10 from the log2 integer part and an expansion of ln around 1.5 */
++        expval = (int)( 0.1760912590558 + exp2 * 0.301029995663981 + ( conv.F - 1.5 ) * 0.289529654602168 );
++        /* now we want to compute 10^expval but we want to be sure it won't overflow */
++        exp2 = (int)( expval * 3.321928094887362 + 0.5 );
++        z    = expval * 2.302585092994046 - exp2 * 0.6931471805599453;
++        z2 = z * z;
++        conv.U = (_PDCLIB_uint64_t)( exp2 + 1023 ) << 52U;
++        /* compute exp(z) using continued fractions
++           see https://en.wikipedia.org/wiki/Exponential_function#Continued_fractions_for_ex
++        */
++        conv.F *= 1 + 2 * z / ( 2 - z + ( z2 / ( 6 + ( z2 / ( 10 + z2 / 14 ) ) ) ) );
++        /* correct for rounding errors */
++        if ( value < conv.F )
++        {
++            expval--;
++            conv.F /= 10;
++        }
++    }
++    else
++    {
++        /* zero is 0e0 */
++        expval = 0;
++        conv.F = 0;
++    }
++
++    /* the exponent format is "%+03d" and largest value is "307", so set aside 4-5 characters */
++    minwidth = ( ( expval < 100 ) && ( expval > -100 ) ) ? 4U : 5U;
++
++    /* in "%g" mode, "prec" is the number of *significant figures* not decimals */
++    if ( flags & _PDCLIB_FTOA_FLAG_ADAPT_EXP )
++    {
++        const int user_prec = ( flags & _PDCLIB_FTOA_FLAG_PRECISION ); /* remember if prec was specified */
++        flags |= _PDCLIB_FTOA_FLAG_PRECISION; /* make sure _ftoa respects precision */
++        /* do we want to fall-back to "%f" mode? */
++        if ( ( expval >= -4 ) &&  ( expval < 6 || ( expval < (int)prec && expval <= 9 ) ) )
++        {
++            if ( (int)prec > expval )
++                prec = (unsigned)( (int)prec - expval - 1 );
++            else
++                prec = 0;
++            /* no characters in exponent */
++            minwidth = 0U;
++            expval = 0;
++        }
++        else
++        {
++            /* we use one sigfig for the whole part */
++            if ( ( prec > 0 ) )
++                --prec;
++        }
++        /* try to omit trailing zeros on the fractional part if there wasn't any precision specified */
++        if ( !user_prec && prec && prec < 10 )
++        {
++            /* FIXME: this is very bad and grossly incorrect */
++            const unsigned long whole = (unsigned long)value;
++            unsigned long frac = (unsigned long) ( ( value - whole ) * pow10[prec] );
++            while ( prec && ( ( frac % 10UL ) == 0UL ) )
++            {
++                --prec;
++                frac /= 10UL;
++            }
++        }
++    }
++
++    /* will everything fit? */
++    fwidth = width;
++    if ( width > minwidth )
++    {
++        /* we didn't fall-back so subtract the characters required for the exponent */
++        fwidth -= minwidth;
++    }
++    else
++    {
++        /* not enough characters, so go back to default sizing */
++        fwidth = 0U;
++    }
++
++    if ( ( flags & _PDCLIB_FTOA_FLAG_LEFT ) && minwidth )
++        fwidth = 0U; /* if we're padding on the right, DON'T pad the floating part */
++
++    /* rescale the float value */
++    if ( expval ) value /= conv.F;
++
++    /* output the floating part */
++    start_idx = idx;
++    idx = _PDCLIB_ftoa( out, status, idx, negative ? -value : value, prec, fwidth, flags & ~_PDCLIB_FTOA_FLAG_ADAPT_EXP );
++
++    /* output the exponent part */
++    if ( minwidth )
++    {
++        char expbuf[16]; /* can't really have an exponent larger than that */
++        const int expneg = ( expval < 0 );
++        int expidx = (int)sizeof( expbuf ) - 1;
++        if ( expneg ) expval = -expval;
++        /* output the exponential symbol */
++        out( status, ( flags & _PDCLIB_FTOA_FLAG_UPPER ) ? 'E' : 'e' );
++        ++idx;
++        /* output the exponent sign */
++        out( status, expneg ? '-' : '+' );
++        ++idx;
++        /* store the exponent value */
++        expbuf[expidx--] = 0;
++        do
++        {
++            expbuf[expidx--] = '0' + ( expval % 10 );
++            expval /= 10;
++        }
++        while ( expval && expidx >= 0 );
++        /* output it */
++        for ( ++expidx; expbuf[expidx]; ++expidx, ++idx )
++            out( status, expbuf[expidx] );
++        /* might need to right-pad spaces */
++        if ( flags & _PDCLIB_FTOA_FLAG_LEFT )
++        {
++            while ( idx - start_idx < width )
++            {
++                out( status, ' ' );
++                ++idx;
++            }
++        }
++    }
++
++    return idx;
++}
+diff --git a/functions/_PDCLIB/_PDCLIB_print.c b/functions/_PDCLIB/_PDCLIB_print.c
+index 2699ab9..12b62b0 100644
+--- a/functions/_PDCLIB/_PDCLIB_print.c
++++ b/functions/_PDCLIB/_PDCLIB_print.c
+@@ -10,6 +10,7 @@
+ #include <stdlib.h>
+ #include <stddef.h>
+ #include <string.h>
++#include <ctype.h>
+ 
+ #ifndef REGTEST
+ 
+@@ -40,6 +41,12 @@
+ #define E_lower    (1u<<15)
+ #define E_unsigned (1u<<16)
+ 
++#define E_float    (1u<<17)
++#define E_fexp     (1u<<18)
++#define E_fautoexp (1u<<19)
++
++#define E_prec     (1u<<20)
++
+ /* This macro delivers a given character to either a memory buffer or a stream,
+    depending on the contents of 'status' (struct _PDCLIB_status_t).
+    x - the character to be delivered
+@@ -265,6 +272,13 @@ static void stringformat( const char * s, struct _PDCLIB_status_t * status )
+ }
+ 
+ 
++static void print_out( struct _PDCLIB_status_t * status, int ch )
++{
++    PUT( ch );
++    ++(status->current);
++}
++
++
+ const char * _PDCLIB_print( const char * spec, struct _PDCLIB_status_t * status )
+ {
+     const char * orig_spec = spec;
+@@ -369,6 +383,8 @@ const char * _PDCLIB_print( const char * spec, struct _PDCLIB_status_t * status
+         }
+         /* Having a precision cancels out any zero flag. */
+         status->flags &= ~E_zero;
++        /* Distinguish between no precision and 0 precision. */
++        status->flags |= E_prec;
+     }
+ 
+     /* Optional length modifier
+@@ -449,15 +465,23 @@ const char * _PDCLIB_print( const char * spec, struct _PDCLIB_status_t * status
+             status->base = 16;
+             status->flags |= E_unsigned;
+             break;
+-        case 'f':
+-        case 'F':
+-        case 'e':
+-        case 'E':
+-        case 'g':
+         case 'G':
++        case 'g':
++            status->flags |= E_fautoexp;
++            /* fallthrough */
++        case 'E':
++        case 'e':
++            status->flags |= E_fexp;
++            /* fallthrough */
++        case 'F':
++        case 'f':
++            status->flags |= E_float;
++            if ( islower( *spec ) )
++                status->flags |= E_lower;
+             break;
+-        case 'a':
+         case 'A':
++        case 'a':
++            /* TODO: hex floats */
+             break;
+         case 'c':
+             /* TODO: wide chars. */
+@@ -488,7 +512,54 @@ const char * _PDCLIB_print( const char * spec, struct _PDCLIB_status_t * status
+     }
+ 
+     /* Do the actual output based on our findings */
+-    if ( status->base != 0 )
++    if ( status->flags & E_float )
++    {
++        /* Float conversions */
++        /* TODO: Check for invalid flag combinations. */
++        /* TODO: handle float and long double properly */
++        int pprec = status->prec;
++        unsigned int pwidth = status->width;
++        unsigned int pflags = 0;
++        double value;
++        if ( !( status->flags & E_lower ) )
++            pflags |= _PDCLIB_FTOA_FLAG_UPPER;
++        if ( status->flags & E_zero )
++            pflags |= _PDCLIB_FTOA_FLAG_ZEROPAD;
++        if ( status->flags & E_space )
++            pflags |= _PDCLIB_FTOA_FLAG_SPACE;
++        if ( status->flags & E_plus )
++            pflags |= _PDCLIB_FTOA_FLAG_PLUS;
++        if ( status->flags & E_prec )
++            pflags |= _PDCLIB_FTOA_FLAG_PRECISION;
++        else
++            pprec = 0;
++        switch ( status->flags & ( E_long | E_ldouble ) )
++        {
++            case E_ldouble:
++                value = (double)va_arg( status->arg, long double );
++                break;
++            case E_long:
++            case 0: /* floats are promoted to doubles */
++                value = (double)va_arg( status->arg, double );
++                break;
++            default:
++                puts( "UNSUPPORTED PRINTF FLAG COMBINATION" );
++                return NULL;
++        }
++        if ( status->flags & E_fexp )
++        {
++            /* exponent format, use etoa */
++            if ( status->flags & E_fautoexp )
++                pflags |= _PDCLIB_FTOA_FLAG_ADAPT_EXP; /* fall back to %f when needed */
++            _PDCLIB_etoa( print_out, status, 0, value, pprec, pwidth, pflags );
++        }
++        else
++        {
++            /* normal format, use ftoa */
++            _PDCLIB_ftoa( print_out, status, 0, value, pprec, pwidth, pflags );
++        }
++    }
++    else if ( status->base != 0 )
+     {
+         /* Integer conversions */
+         /* TODO: Check for invalid flag combinations. */
+diff --git a/functions/_PDCLIB/_PDCLIB_scan.c b/functions/_PDCLIB/_PDCLIB_scan.c
+index 1f8fd71..53bafb7 100644
+--- a/functions/_PDCLIB/_PDCLIB_scan.c
++++ b/functions/_PDCLIB/_PDCLIB_scan.c
+@@ -27,7 +27,8 @@
+ #define E_size       1<<11
+ #define E_ptrdiff    1<<12
+ #define E_pointer    1<<13
+-#define E_ldouble    1<<14
++#define E_float      1<<14
++#define E_ldouble    1<<15
+ #define E_unsigned   1<<16
+ 
+ 
+@@ -112,6 +113,281 @@ static int IN_SCANSET( const char * scanlist, const char * end_scanlist, int rc
+ }
+ 
+ 
++/* Helper function to parse an integer out of the input stream */
++static int parse_integer( struct _PDCLIB_status_t * status, uintmax_t *outvalue, int *outsign, int *outchr )
++{
++    uintmax_t value = 0;
++    int prefix_parsed = 0;
++    int sign = 0;
++    int rc = 0;
++    int value_parsed = 0;
++
++    while ( ( status->current < status->width ) &&
++            ( ( rc = GET( status ) ) != EOF ) )
++    {
++        if ( isspace( rc ) )
++        {
++            if ( sign )
++            {
++                /* matching sequence terminated by whitespace */
++                UNGET( rc, status );
++                break;
++            }
++            else
++            {
++                /* leading whitespace not counted against width */
++                status->current--;
++            }
++        }
++        else if ( ! sign )
++        {
++            /* no sign parsed yet */
++            switch ( rc )
++            {
++                case '-':
++                    sign = -1;
++                    break;
++                case '+':
++                    sign = 1;
++                    break;
++                default:
++                    /* not a sign; put back character */
++                    sign = 1;
++                    UNGET( rc, status );
++                    break;
++            }
++        }
++        else if ( ! prefix_parsed )
++        {
++            /* no prefix (0x... for hex, 0... for octal) parsed yet */
++            prefix_parsed = 1;
++            if ( rc != '0' )
++            {
++                /* not a prefix; if base not yet set, set to decimal */
++                if ( status->base == 0 )
++                {
++                    status->base = 10;
++                }
++                UNGET( rc, status );
++            }
++            else
++            {
++                /* starts with zero, so it might be a prefix. */
++                /* check what follows next (might be 0x...) */
++                if ( ( status->current < status->width ) &&
++                     ( ( rc = GET( status ) ) != EOF ) )
++                {
++                    if ( tolower( rc ) == 'x' )
++                    {
++                        /* 0x... would be prefix for hex base... */
++                        if ( ( status->base == 0 ) ||
++                             ( status->base == 16 ) )
++                        {
++                            status->base = 16;
++                        }
++                        else
++                        {
++                            /* ...unless already set to other value */
++                            UNGET( rc, status );
++                            value_parsed = 1;
++                        }
++                    }
++                    else
++                    {
++                        /* 0... but not 0x.... would be octal prefix */
++                        UNGET( rc, status );
++                        if ( status->base == 0 )
++                        {
++                            status->base = 8;
++                        }
++                        /* in any case we have read a zero */
++                        value_parsed = 1;
++                    }
++                }
++                else
++                {
++                    /* failed to read beyond the initial zero */
++                    value_parsed = 1;
++                    break;
++                }
++            }
++        }
++        else
++        {
++            char * digitptr = memchr( _PDCLIB_digits, tolower( rc ), status->base );
++            if ( digitptr == NULL )
++            {
++                /* end of input item */
++                UNGET( rc, status );
++                break;
++            }
++            value *= status->base;
++            value += digitptr - _PDCLIB_digits;
++            value_parsed = 1;
++        }
++    }
++
++    *outvalue = value;
++    *outsign = sign;
++    *outchr = rc;
++
++    return value_parsed;
++}
++
++
++/* Helper function to parse a float out of the input stream */
++static int parse_double( struct _PDCLIB_status_t * status, double *outvalue, int *outchr )
++{
++    /* slightly simplified version of the parser in _PDCLIB_fmtstrtod()
++       this very sub-optimal because we essentially do the work strtod it
++       going to do later, but to fix that someone would have to adapt it
++       for use with GETC/UNGETC kind of functions
++    */
++
++    enum
++    {
++        /* max characters in string representation */
++        FP_NUM_DIGITS = 256,
++        /* state graph */
++        FP_STATE0 = 0, /* _  _S0 +S1 #S2 .S3 */
++        FP_STATE1,     /* _+         #S2 .S3 */
++        FP_STATE2,     /* _+#    #S2 .S4 eS5 */
++        FP_STATE3,     /* _+.            #S4 */
++        FP_STATE4,     /* _+#.#      #S4 eS5 */
++        FP_STATE5,     /* _+#.#e     +S6 #S7 */
++        FP_STATE6,     /* _+#.#e+        #S7 */
++        FP_STATE7      /* _+#.#e+#       #S7 */
++    };
++
++    char str[FP_NUM_DIGITS + 1];
++    unsigned int nstr = 0;
++    unsigned int flags = 0;
++    int state = FP_STATE0;
++    int rc = 0;
++
++    /* TODO: support hex floats */
++    /* TODO: +-inf, nan */
++    while ( ( status->current < status->width ) &&
++            ( ( rc = GET( status ) ) != EOF ) )
++    {
++        if ( rc >= '0' && rc <= '9' )
++        {
++            switch ( state )
++            {
++                case FP_STATE0:
++                case FP_STATE1:
++                case FP_STATE2:
++                    state = FP_STATE2;
++                    break;
++                case FP_STATE3:
++                case FP_STATE4:
++                    state = FP_STATE4;
++                    break;
++                case FP_STATE5:
++                case FP_STATE6:
++                case FP_STATE7:
++                    state = FP_STATE7;
++                    break;
++            }
++            /* digits are valid in any state */
++            /* even shit like +0000.00050E-0050 should work */
++            if ( nstr < FP_NUM_DIGITS )
++                str[nstr++] = rc;
++            continue;
++        }
++        switch ( rc )
++        {
++            case '\t':
++            case '\n':
++            case '\v':
++            case '\f':
++            case '\r':
++            case ' ':
++                if ( state == FP_STATE0 )
++                {
++                    /* leading whitespace not counted against width */
++                    status->current--;
++                    continue;
++                }
++                break; /* syntax error */
++            case '-':
++            case '+':
++                if ( state == FP_STATE0 )
++                    state = FP_STATE1;
++                else if ( state == FP_STATE5 )
++                    state = FP_STATE6;
++                else
++                    break; /* syntax error */
++                /* consume the sign */
++                if ( nstr < FP_NUM_DIGITS )
++                    str[nstr++] = rc;
++                continue;
++            case '.':
++                if ( state == FP_STATE0 || state == FP_STATE1 )
++                {
++                    state = FP_STATE3;
++                    /* consume the point */
++                    if ( nstr < FP_NUM_DIGITS )
++                        str[nstr++] = rc;
++                    continue;
++                }
++                if ( state == FP_STATE2 )
++                {
++                    state = FP_STATE4;
++                    /* consume the point */
++                    if ( nstr < FP_NUM_DIGITS )
++                        str[nstr++] = rc;
++                    continue;
++                }
++                break; /* syntax error */
++            case 'e':
++            case 'E':
++                if ( state == FP_STATE2 || state == FP_STATE4 )
++                {
++                    state = FP_STATE5;
++                    /* consume the exp sign */
++                    if ( nstr < FP_NUM_DIGITS )
++                        str[nstr++] = rc;
++                    continue;
++                }
++                break; /* syntax error */
++            default:
++                break; /* unexpected character */
++        }
++        /* invalid character; return it to the stream and bail */
++        UNGET( rc, status );
++        break;
++    }
++
++    str[nstr] = 0;
++    *outchr = rc;
++
++    /* let's see what we have parsed */
++    switch ( state )
++    {
++        case FP_STATE0:
++            /* stuck in state0, it's either bogus or a nan */
++            /* TODO: handle nan */
++            /* fallthrough */
++        case FP_STATE1:
++            /* stuck in state1, it's either bogus or a +-inf */
++            /* TODO: handle +-inf */
++            /* fallthrough */
++        case FP_STATE3:
++            /* no digits found */
++            return 0;
++        default:
++            /* should be valid */
++            break;
++    }
++
++    /* TODO: properly handle floats and long doubles */
++    *outvalue = _PDCLIB_fmtstrtod( str, NULL );
++
++    return 1;
++}
++
++
+ const char * _PDCLIB_scan( const char * spec, struct _PDCLIB_status_t * status )
+ {
+     /* generic input character */
+@@ -251,6 +527,7 @@ const char * _PDCLIB_scan( const char * spec, struct _PDCLIB_status_t * status )
+         case 'G':
+         case 'a':
+         case 'A':
++            status->flags |= E_float;
+             break;
+         case 'c':
+         {
+@@ -399,116 +676,50 @@ const char * _PDCLIB_scan( const char * spec, struct _PDCLIB_status_t * status )
+             return orig_spec;
+     }
+ 
+-    if ( status->base != -1 )
++    if ( status->flags & E_float )
+     {
+-        /* integer conversion */
+-        uintmax_t value = 0;         /* absolute value read */
+-        int prefix_parsed = 0;
+-        int sign = 0;
+-        while ( ( status->current < status->width ) &&
+-                ( ( rc = GET( status ) ) != EOF ) )
++        /* float conversion */
++        double value;
++        value_parsed = parse_double( status, &value, &rc );
++        /* width or input exhausted, or non-matching character */
++        if ( ! value_parsed )
+         {
+-            if ( isspace( rc ) )
+-            {
+-                if ( sign )
+-                {
+-                    /* matching sequence terminated by whitespace */
+-                    UNGET( rc, status );
+-                    break;
+-                }
+-                else
+-                {
+-                    /* leading whitespace not counted against width */
+-                    status->current--;
+-                }
+-            }
+-            else if ( ! sign )
+-            {
+-                /* no sign parsed yet */
+-                switch ( rc )
+-                {
+-                    case '-':
+-                        sign = -1;
+-                        break;
+-                    case '+':
+-                        sign = 1;
+-                        break;
+-                    default:
+-                        /* not a sign; put back character */
+-                        sign = 1;
+-                        UNGET( rc, status );
+-                        break;
+-                }
+-            }
+-            else if ( ! prefix_parsed )
++            /* out of input before anything could be parsed - input error */
++            /* FIXME: if first character does not match, value_parsed is not set - but it is NOT an input error */
++            if ( ( status->n == 0 ) && ( rc == EOF ) )
+             {
+-                /* no prefix (0x... for hex, 0... for octal) parsed yet */
+-                prefix_parsed = 1;
+-                if ( rc != '0' )
+-                {
+-                    /* not a prefix; if base not yet set, set to decimal */
+-                    if ( status->base == 0 )
+-                    {
+-                        status->base = 10;
+-                    }
+-                    UNGET( rc, status );
+-                }
+-                else
+-                {
+-                    /* starts with zero, so it might be a prefix. */
+-                    /* check what follows next (might be 0x...) */
+-                    if ( ( status->current < status->width ) &&
+-                         ( ( rc = GET( status ) ) != EOF ) )
+-                    {
+-                        if ( tolower( rc ) == 'x' )
+-                        {
+-                            /* 0x... would be prefix for hex base... */
+-                            if ( ( status->base == 0 ) ||
+-                                 ( status->base == 16 ) )
+-                            {
+-                                status->base = 16;
+-                            }
+-                            else
+-                            {
+-                                /* ...unless already set to other value */
+-                                UNGET( rc, status );
+-                                value_parsed = 1;
+-                            }
+-                        }
+-                        else
+-                        {
+-                            /* 0... but not 0x.... would be octal prefix */
+-                            UNGET( rc, status );
+-                            if ( status->base == 0 )
+-                            {
+-                                status->base = 8;
+-                            }
+-                            /* in any case we have read a zero */
+-                            value_parsed = 1;
+-                        }
+-                    }
+-                    else
+-                    {
+-                        /* failed to read beyond the initial zero */
+-                        value_parsed = 1;
+-                        break;
+-                    }
+-                }
++                status->n = -1;
+             }
+-            else
++            return NULL;
++        }
++        /* convert value to target type and assign to parameter */
++        if ( ! ( status->flags & E_suppressed ) )
++        {
++            switch ( status->flags & ( E_long | E_ldouble ) )
+             {
+-                char * digitptr = memchr( _PDCLIB_digits, tolower( rc ), status->base );
+-                if ( digitptr == NULL )
+-                {
+-                    /* end of input item */
+-                    UNGET( rc, status );
++                case E_long:
++                    *( va_arg( status->arg,      double * ) ) =      (double)( value );
+                     break;
+-                }
+-                value *= status->base;
+-                value += digitptr - _PDCLIB_digits;
+-                value_parsed = 1;
++                case E_ldouble:
++                    *( va_arg( status->arg, long double * ) ) = (long double)( value );
++                    break;
++                case 0:
++                    *( va_arg( status->arg,       float * ) ) =       (float)( value );
++                    break;
++                default:
++                    puts( "UNSUPPORTED SCANF FLAG COMBINATION" );
++                    return NULL; /* behaviour unspecified */
+             }
++            ++(status->n);
+         }
++        return ++spec;
++    }
++    else if ( status->base != -1 )
++    {
++        /* integer conversion */
++        uintmax_t value = 0;         /* absolute value read */
++        int sign = 0;
++        value_parsed = parse_integer( status, &value, &sign, &rc );
+         /* width or input exhausted, or non-matching character */
+         if ( ! value_parsed )
+         {
+diff --git a/functions/_PDCLIB/_PDCLIB_strtod.c b/functions/_PDCLIB/_PDCLIB_strtod.c
+new file mode 100644
+index 0000000..4b3bde3
+--- /dev/null
++++ b/functions/_PDCLIB/_PDCLIB_strtod.c
+@@ -0,0 +1,568 @@
++/*
++ * The authors of this software are Rob Pike and Ken Thompson.
++ * Copyright (c) 2002 by Lucent Technologies.
++ * Permission to use, copy, modify, and distribute this software for any
++ * purpose without fee is hereby granted, provided that this entire notice
++ * is included in all copies of any software which is or includes a copy
++ * or modification of this software and in all copies of the supporting
++ * documentation for such software.
++ * THIS SOFTWARE IS BEING PROVIDED "AS IS", WITHOUT ANY EXPRESS OR IMPLIED
++ * WARRANTY.  IN PARTICULAR, NEITHER THE AUTHORS NOR LUCENT TECHNOLOGIES MAKE ANY
++ * REPRESENTATION OR WARRANTY OF ANY KIND CONCERNING THE MERCHANTABILITY
++ * OF THIS SOFTWARE OR ITS FITNESS FOR ANY PARTICULAR PURPOSE.
++*/
++
++/* Plan 9's implementation of strtod(). Used for strtod() & co and scanf() & co  */
++/* Some corrections and extensions from the version used in the k8vavoom project */
++
++#include <stdlib.h>
++#include <math.h>
++#include <ctype.h>
++#include <string.h>
++#include <errno.h>
++
++#include "pdclib/_PDCLIB_int.h"
++
++#ifndef ARRAYSIZE
++#define ARRAYSIZE(x) (sizeof(x) / sizeof(*(x)))
++#endif
++
++/*
++ * This routine will convert to arbitrary precision
++ * floating point entirely in multi-precision fixed.
++ * The answer is the closest floating point number to
++ * the given decimal number. Exactly half way are
++ * rounded ala ieee rules.
++ * Method is to scale input decimal between .500 and .999...
++ * with external power of 2, then binary search for the
++ * closest mantissa to this decimal number.
++ * Nmant is is the required precision. (53 for ieee dp)
++ * Nbits is the max number of bits/word. (must be <= 28)
++ * Prec is calculated - the number of words of fixed mantissa.
++ */
++enum
++{
++    Nbits   = 28,                            /* bits safely represented in a unsigned int */
++    Nmant   = 53,                            /* bits of precision required */
++    Prec    = ( Nmant + Nbits + 1 ) / Nbits, /* words of Nbits each to represent mantissa */
++    Sigbit  = 1 << ( Prec * Nbits - Nmant ), /* first significant bit of Prec-th word */
++    Ndig    = 1500,
++    One     = (unsigned int)( 1 << Nbits ),
++    Half    = (unsigned int)( One >> 1 ),
++    Maxe    = 310,
++
++    Fsign   = 1 << 0,                        /* found - */
++    Fesign  = 1 << 1,                        /* found e- */
++    Fdpoint = 1 << 2,                        /* found . */
++
++    S0      = 0,                             /* _  _S0 +S1 #S2 .S3 */
++    S1,                                      /* _+         #S2 .S3 */
++    S2,                                      /* _+#    #S2 .S4 eS5 */
++    S3,                                      /* _+.            #S4 */
++    S4,                                      /* _+#.#      #S4 eS5 */
++    S5,                                      /* _+#.#e     +S6 #S7 */
++    S6,                                      /* _+#.#e+        #S7 */
++    S7                                       /* _+#.#e+#       #S7 */
++};
++
++static int xcmp( char *, char * );
++static int fpcmp( char *, unsigned int * );
++static void frnorm( unsigned int * );
++static void divascii( char *, int *, int *, int * );
++static void mulascii( char *, int *, int *, int * );
++static unsigned int umuldiv( unsigned int, unsigned int, unsigned int );
++static inline double get_nan( void );
++
++double _PDCLIB_fmtstrtod( const char * as, char * * aas )
++{
++    int na, ex, dp, bp, c, i, flag, state;
++    unsigned int low[Prec], hig[Prec], mid[Prec];
++    double d;
++    char * s, a[Ndig];
++
++    flag = 0; /* Fsign, Fesign, Fdpoint */
++    na = 0;   /* number of digits of a[] */
++    dp = 0;   /* na of decimal point */
++    ex = 0;   /* exonent */
++
++    state = S0;
++    for ( s = (char *)as; ; s++ )
++    {
++        c = *s;
++        if ( c >= '0' && c <= '9' )
++        {
++            switch ( state )
++            {
++                case S0:
++                case S1:
++                case S2:
++                    state = S2;
++                    break;
++                case S3:
++                case S4:
++                    state = S4;
++                    break;
++
++                case S5:
++                case S6:
++                case S7:
++                    state = S7;
++                    ex = ex * 10 + ( c - '0' );
++                    continue;
++            }
++            if ( na == 0 && c == '0' )
++            {
++                dp--;
++                continue;
++            }
++            if ( na < Ndig - 50 )
++                a[na++] = c;
++            continue;
++        }
++        switch ( c )
++        {
++            case '\t':
++            case '\n':
++            case '\v':
++            case '\f':
++            case '\r':
++            case ' ':
++                if ( state == S0 )
++                    continue;
++                break;
++            case '-':
++                if ( state == S0 )
++                    flag |= Fsign;
++                else
++                    flag |= Fesign;
++            case '+':
++                if ( state == S0 )
++                    state = S1;
++                else if ( state == S5 )
++                    state = S6;
++                else
++                    break; /* syntax */
++                continue;
++            case '.':
++                flag |= Fdpoint;
++                dp = na;
++                if ( state == S0 || state == S1 )
++                {
++                    state = S3;
++                    continue;
++                }
++                if ( state == S2 )
++                {
++                    state = S4;
++                    continue;
++                }
++                break;
++            case 'e':
++            case 'E':
++                if ( state == S2 || state == S4 )
++                {
++                    state = S5;
++                    continue;
++                }
++                break;
++        }
++        break;
++    }
++
++    /*
++     * clean up return char-pointer
++     */
++    switch ( state )
++    {
++        case S0:
++            if ( xcmp(s, "nan") == 0 )
++            {
++                if ( aas ) *aas = s + 3;
++                goto retnan;
++            }
++        case S1:
++            if ( xcmp(s, "infinity") == 0 )
++            {
++                if ( aas ) *aas = s + 8;
++                goto retinf;
++            }
++            if(xcmp(s, "inf") == 0)
++            {
++                if ( aas ) *aas = s + 3;
++                goto retinf;
++            }
++        case S3:
++            if ( aas ) *aas = (char*)as;
++            goto ret0; /* no digits found */
++        case S6:
++            s--; /* back over +- */
++        case S5:
++            s--; /* back over e */
++            break;
++    }
++    if ( aas ) *aas = s;
++
++    if ( flag & Fdpoint )
++    {
++        while ( na > 0 && a[na-1] == '0' )
++            na--;
++    }
++
++    if ( na == 0 ) goto ret0; /* zero */
++
++    a[na] = 0;
++
++    if ( !( flag & Fdpoint ) )
++        dp = na;
++    if ( flag & Fesign )
++        ex = -ex;
++    dp += ex;
++    if ( dp < -Maxe )
++    {
++        errno = ERANGE;
++        goto ret0; /* underflow by exp */
++    } 
++    else if ( dp > +Maxe )
++    {
++        goto retinf; /* overflow by exp */
++    }
++
++    /*
++     * normalize the decimal ascii number
++     * to range .[5-9][0-9]* e0
++     */
++    bp = 0; /* binary exponent */
++    while ( dp > 0 )
++        divascii(a, &na, &dp, &bp);
++    while ( dp < 0 || a[0] < '5' )
++        mulascii(a, &na, &dp, &bp);
++
++    /* close approx by naive conversion */
++    mid[0] = 0;
++    mid[1] = 1;
++    for ( i = 0; ( c = a[i] ) != '\0'; i++ )
++    {
++        mid[0] = mid[0]*10 + ( c - '0' );
++        mid[1] = mid[1]*10;
++        if(i >= 8)
++            break;
++    }
++    low[0] = umuldiv( mid[0], One, mid[1] );
++    hig[0] = umuldiv( mid[0]+1, One, mid[1] );
++    for( i = 1; i < Prec; i++ )
++    {
++        low[i] = 0;
++        hig[i] = One-1;
++    }
++
++    /* binary search for closest mantissa */
++    for ( ; ; )
++    {
++        /* mid = (hig + low) / 2 */
++        c = 0;
++        for ( i = 0; i < Prec; i++ )
++        {
++            mid[i] = hig[i] + low[i];
++            if ( c ) mid[i] += One;
++            c = mid[i] & 1;
++            mid[i] >>= 1;
++        }
++        frnorm(mid);
++
++        /* compare */
++        c = fpcmp(a, mid);
++        if ( c > 0 )
++        {
++            c = 1;
++            for ( i = 0; i < Prec; i++ )
++            {
++                if ( low[i] != mid[i] )
++                {
++                    c = 0;
++                    low[i] = mid[i];
++                }
++            }
++            if ( c ) break; /* between mid and hig */
++            continue;
++        }
++        if ( c < 0 )
++        {
++            for ( i = 0; i < Prec; i++ )
++                hig[i] = mid[i];
++            continue;
++        }
++
++        /* only hard part is if even/odd roundings wants to go up */
++        c = mid[Prec-1] & (Sigbit-1);
++        if ( c == Sigbit / 2 && ( mid[Prec-1] & Sigbit ) == 0 )
++            mid[Prec-1] -= c;
++        break;    /* exactly mid */
++    }
++
++    /* normal rounding applies */
++    c = mid[Prec-1] & ( Sigbit - 1 );
++    mid[Prec-1] -= c;
++    if ( c >= Sigbit / 2 )
++    {
++        mid[Prec-1] += Sigbit;
++        frnorm(mid);
++    }
++    goto out;
++
++ret0:
++    return 0;
++
++retnan:
++    return get_nan();
++
++retinf:
++    /*
++     * Unix strtod requires these. Plan 9 would return Inf(0) or Inf(-1). */
++    errno = ERANGE;
++    if ( flag & Fsign )
++        return -HUGE_VAL;
++    return HUGE_VAL;
++
++out:
++    d = 0;
++    for ( i = 0; i < Prec; i++ )
++        d = d * One + mid[i];
++    if ( flag & Fsign )
++        d = -d;
++    d = ldexp( d, bp - Prec * Nbits );
++    if ( d == 0 ) errno = ERANGE; /* underflow */
++    return d;
++}
++
++/* private functions */
++
++typedef struct Tab Tab;
++struct Tab
++{
++    int bp;
++    int siz;
++    char * cmp;
++};
++
++static unsigned int umuldiv( unsigned int a, unsigned int b, unsigned int c )
++{
++    double d;
++    d = ( (double)a * (double)b ) / (double)c;
++    if ( d >= 4294967295.0 ) d = 4294967295.0;
++    return (unsigned int)d;
++}
++
++static inline double get_nan( void )
++{
++    static const uint64_t uvnan = 0x7FF0000000000001ULL;
++    return *(const double *)&uvnan;
++}
++
++static void frnorm( unsigned int *f )
++{
++    int i, c;
++    c = 0;
++    for ( i = Prec - 1; i > 0; i-- )
++    {
++        f[i] += c;
++        c = f[i] >> Nbits;
++        f[i] &= One - 1;
++    }
++    f[0] += c;
++}
++
++static int fpcmp( char *a, unsigned int* f )
++{
++    unsigned int tf[Prec];
++    int i, d, c;
++
++    for( i = 0; i < Prec; i++ )
++        tf[i] = f[i];
++
++    for( ; ; )
++    {
++        /* tf *= 10 */
++        for ( i = 0; i < Prec; i++ )
++            tf[i] = tf[i] * 10;
++        frnorm(tf);
++        d = ( tf[0] >> Nbits ) + '0';
++        tf[0] &= One - 1;
++
++        /* compare next digit */
++        c = *a;
++        if ( c == 0 )
++        {
++            if ( '0' < d )
++                return -1;
++            if ( tf[0] != 0 )
++                goto cont;
++            for ( i = 1; i < Prec; i++ )
++            {
++                if ( tf[i] != 0 )
++                    goto cont;
++            }
++            return 0;
++        }
++        if ( c > d )
++            return +1;
++        if ( c < d )
++            return -1;
++        a++;
++    cont:;
++    }
++
++    return 0;
++}
++
++static void divby( char *a, int *na, int b )
++{
++    int n, c;
++    char *p;
++
++    p = a;
++    n = 0;
++    while ( n >> b == 0 )
++    {
++        c = *a++;
++        if ( c == 0 )
++        {
++            while ( n )
++            {
++                c = n * 10;
++                if ( c >> b ) break;
++                n = c;
++            }
++            goto xx;
++        }
++        n = n * 10 + c - '0';
++        (*na)--;
++    }
++    for ( ; ; )
++    {
++        c = n >> b;
++        n -= c << b;
++        *p++ = c + '0';
++        c = *a++;
++        if ( c == 0 ) break;
++        n = n * 10 + c - '0';
++    }
++    (*na)++;
++xx:
++    while ( n )
++    {
++        n = n * 10;
++        c = n >> b;
++        n -= c << b;
++        *p++ = c + '0';
++        (*na)++;
++    }
++    *p = 0;
++}
++
++static const Tab tab1[] =
++{
++    {  1,  0, "" },
++    {  3,  1, "7" },
++    {  6,  2, "63" },
++    {  9,  3, "511" },
++    { 13,  4, "8191" },
++    { 16,  5, "65535" },
++    { 19,  6, "524287" },
++    { 23,  7, "8388607" },
++    { 26,  8, "67108863" },
++    { 27,  9, "134217727" },
++};
++
++static void divascii( char *a, int *na, int *dp, int *bp )
++{
++    int b, d;
++    const Tab *t;
++
++    d = *dp;
++    if ( d >= (int)( ARRAYSIZE( tab1 ) ) )
++        d = (int)( ARRAYSIZE( tab1 ) ) - 1;
++    t = tab1 + d;
++    b = t->bp;
++    if ( memcmp( a, t->cmp, t->siz ) > 0 )
++        d--;
++    *dp -= d;
++    *bp += b;
++    divby( a, na, b );
++}
++
++static void mulby( char *a, char *p, char *q, int b )
++{
++    int n, c;
++
++    n = 0;
++    *p = 0;
++    for ( ; ; )
++    {
++        q--;
++        if ( q < a ) break;
++        c = *q - '0';
++        c = (c << b) + n;
++        n = c / 10;
++        c -= n * 10;
++        p--;
++        *p = c + '0';
++    }
++    while ( n )
++    {
++        c = n;
++        n = c / 10;
++        c -= n * 10;
++        p--;
++        *p = c + '0';
++    }
++}
++
++
++static const Tab tab2[] =
++{
++    {  1,  1, "" }, /* dp = 0-0 */
++    {  3,  3, "125" },
++    {  6,  5, "15625" },
++    {  9,  7, "1953125" },
++    { 13, 10, "1220703125" },
++    { 16, 12, "152587890625" },
++    { 19, 14, "19073486328125" },
++    { 23, 17, "11920928955078125" },
++    { 26, 19, "1490116119384765625" },
++    { 27, 19, "7450580596923828125" }, /* dp 8-9 */
++};
++
++static void mulascii( char *a, int *na, int *dp, int *bp )
++{
++    char *p;
++    int d, b;
++    const Tab *t;
++
++    d = -*dp;
++    if ( d >= (int)( ARRAYSIZE( tab2 ) ) )
++        d = (int)( ARRAYSIZE( tab2 ) ) - 1;
++    t = tab2 + d;
++    b = t->bp;
++    if ( memcmp( a, t->cmp, t->siz ) < 0 )
++        d--;
++    p = a + *na;
++    *bp -= b;
++    *dp += d;
++    *na += d;
++    mulby(a, p+d, p, b);
++}
++
++static int xcmp( char *a, char *b )
++{
++    int c1, c2;
++
++    while ( ( c1 = *b++ ) != '\0' )
++    {
++        c2 = *a++;
++        if ( isupper( c2 ) )
++            c2 = tolower( c2 );
++        if ( c1 != c2 )
++            return 1;
++    }
++    return 0;
++}
+diff --git a/functions/stdlib/atof.c b/functions/stdlib/atof.c
+new file mode 100644
+index 0000000..644b6ea
+--- /dev/null
++++ b/functions/stdlib/atof.c
+@@ -0,0 +1,33 @@
++/* double atof( const char * )
++
++   This file is part of the Public Domain C Library (PDCLib).
++   Permission is granted to use, modify, and / or redistribute at will.
++*/
++
++#include <stdlib.h>
++
++#ifndef REGTEST
++
++#include <errno.h>
++#include "pdclib/_PDCLIB_int.h"
++
++double atof( const char * s )
++{
++    return _PDCLIB_fmtstrtod( s, NULL );
++}
++
++#endif
++
++#ifdef TEST
++
++#include "_PDCLIB_test.h"
++
++#include <errno.h>
++
++int main( void )
++{
++    /* TODO */
++    return TEST_RESULTS;
++}
++
++#endif
+diff --git a/functions/stdlib/strtod.c b/functions/stdlib/strtod.c
+new file mode 100644
+index 0000000..c05b070
+--- /dev/null
++++ b/functions/stdlib/strtod.c
+@@ -0,0 +1,32 @@
++/* double strtod( const char *, char * * )
++
++   This file is part of the Public Domain C Library (PDCLib).
++   Permission is granted to use, modify, and / or redistribute at will.
++*/
++
++#include <stdlib.h>
++
++#ifndef REGTEST
++
++#include "pdclib/_PDCLIB_int.h"
++
++double strtod( const char * _PDCLIB_restrict s, char * * _PDCLIB_restrict endptr )
++{
++    return _PDCLIB_fmtstrtod( s, endptr );
++}
++
++#endif
++
++#ifdef TEST
++
++#include "_PDCLIB_test.h"
++
++#include <errno.h>
++
++int main( void )
++{
++    /* TODO */
++    return TEST_RESULTS;
++}
++
++#endif
+diff --git a/functions/stdlib/strtof.c b/functions/stdlib/strtof.c
+new file mode 100644
+index 0000000..b67a42d
+--- /dev/null
++++ b/functions/stdlib/strtof.c
+@@ -0,0 +1,37 @@
++/* float strtof( const char *, char * * )
++
++   This file is part of the Public Domain C Library (PDCLib).
++   Permission is granted to use, modify, and / or redistribute at will.
++*/
++
++#include <stdlib.h>
++
++#ifndef REGTEST
++
++#include <math.h>
++#include "pdclib/_PDCLIB_int.h"
++
++float strtof( const char * _PDCLIB_restrict s, char * * _PDCLIB_restrict endptr )
++{
++  /* FIXME: just converting the strtod result to float causes double rounding */
++  const double v = _PDCLIB_fmtstrtod( s, endptr );
++  if ( isnan( v ) )
++      return nanf( NULL );
++  return (float)v;
++}
++
++#endif
++
++#ifdef TEST
++
++#include "_PDCLIB_test.h"
++
++#include <errno.h>
++
++int main( void )
++{
++    /* TODO */
++    return TEST_RESULTS;
++}
++
++#endif
+diff --git a/functions/stdlib/strtold.c b/functions/stdlib/strtold.c
+new file mode 100644
+index 0000000..4a14517
+--- /dev/null
++++ b/functions/stdlib/strtold.c
+@@ -0,0 +1,33 @@
++/* long double strtold( const char *, char * * )
++
++   This file is part of the Public Domain C Library (PDCLib).
++   Permission is granted to use, modify, and / or redistribute at will.
++*/
++
++#include <stdlib.h>
++
++#ifndef REGTEST
++
++#include "pdclib/_PDCLIB_int.h"
++
++long double strtold( const char * _PDCLIB_restrict s, char * * _PDCLIB_restrict endptr )
++{
++    /* TODO: proper long double handling */
++    return (long double)_PDCLIB_fmtstrtod( s, endptr );
++}
++
++#endif
++
++#ifdef TEST
++
++#include "_PDCLIB_test.h"
++
++#include <errno.h>
++
++int main( void )
++{
++    /* TODO */
++    return TEST_RESULTS;
++}
++
++#endif
+diff --git a/include/pdclib/_PDCLIB_int.h b/include/pdclib/_PDCLIB_int.h
+index e5799be..0b25c5c 100644
+--- a/include/pdclib/_PDCLIB_int.h
++++ b/include/pdclib/_PDCLIB_int.h
+@@ -422,6 +422,29 @@ _PDCLIB_LOCAL void _PDCLIB_setstream( struct _PDCLIB_file_t * stream );
+ /* Backend for strtok and strtok_s (plus potential extensions like strtok_r). */
+ _PDCLIB_LOCAL char * _PDCLIB_strtok( char * _PDCLIB_restrict s1, _PDCLIB_size_t * _PDCLIB_restrict s1max, const char * _PDCLIB_restrict s2, char ** _PDCLIB_restrict ptr );
+ 
++/* Backend for strtod/strtof/atof/atod and *scanf for floats */
++_PDCLIB_LOCAL double _PDCLIB_fmtstrtod( const char * str, char * * endptr );
++
++/* Backends for ftoa and *printf for floats */
++/* Output function type */
++typedef void ( * _PDCLIB_ftoa_out_fn )( struct _PDCLIB_status_t *, int );
++/* Normal format */
++unsigned int _PDCLIB_ftoa( _PDCLIB_ftoa_out_fn out, struct _PDCLIB_status_t * status, int idx, double value, unsigned int prec, unsigned int width, unsigned int flags );
++/* Exponential/scientific format */
++unsigned int _PDCLIB_etoa( _PDCLIB_ftoa_out_fn out, struct _PDCLIB_status_t * status, int idx, double value, unsigned int prec, unsigned int width, unsigned int flags );
++
++/* -------------------------------------------------------------------------- */
++/* ftoa flags and constants                                                   */
++/* -------------------------------------------------------------------------- */
++
++#define _PDCLIB_FTOA_FLAG_ZEROPAD   (1U <<  0U)
++#define _PDCLIB_FTOA_FLAG_PLUS      (1U <<  2U)
++#define _PDCLIB_FTOA_FLAG_SPACE     (1U <<  3U)
++#define _PDCLIB_FTOA_FLAG_UPPER     (1U <<  4U)
++#define _PDCLIB_FTOA_FLAG_LEFT      (1U <<  5U)
++#define _PDCLIB_FTOA_FLAG_PRECISION (1U << 10U)
++#define _PDCLIB_FTOA_FLAG_ADAPT_EXP (1U << 11U)
++
+ /* -------------------------------------------------------------------------- */
+ /* errno                                                                      */
+ /* -------------------------------------------------------------------------- */
+diff --git a/platform/xbox/functions/math/log2.c b/platform/xbox/functions/math/log2.c
+index 5a81d13..d7cd7d0 100644
+--- a/platform/xbox/functions/math/log2.c
++++ b/platform/xbox/functions/math/log2.c
+@@ -3,18 +3,30 @@
+ 
+ double log2(double x)
+ {
+-    assert(0); // Not implemented
+-    return 0.0;
++    double r;
++    __asm__ ("fld1;"
++             "fldl %1;"
++             "fyl2x;"
++             "fstpl %0;" : "=m"(r) : "m"(x) : "st");
++    return r;
+ }
+ 
+ float log2f(float x)
+ {
+-    assert(0); // Not implemented
+-    return 0.0;
++    float r;
++    __asm__ ("fld1;"
++             "flds %1;"
++             "fyl2x;"
++             "fstps %0;" : "=m"(r) : "m"(x) : "st");
++    return r;
+ }
+ 
+ long double log2l(long double x)
+ {
+-    assert(0); // Not implemented
+-    return 0.0;
++    long double r;
++    __asm__ ("fld1;"
++             "fldt %1;"
++             "fyl2x;"
++             "fstpt %0;" : "=m"(r) : "m"(x) : "st");
++    return r;
+ }

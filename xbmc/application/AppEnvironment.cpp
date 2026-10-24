@@ -22,7 +22,11 @@ void CAppEnvironment::SetUp(const std::shared_ptr<CAppParams>& appParams)
 
 void CAppEnvironment::TearDown()
 {
+  CLog::Log(LOGDEBUG, "Environment teardown: deinitialize settings");
   CServiceBroker::GetSettingsComponent()->Deinitialize();
+  CLog::Log(LOGDEBUG, "Environment teardown: release settings component");
   CServiceBroker::UnregisterSettingsComponent();
+  CLog::Log(LOGDEBUG, "Environment teardown: release application parameters");
   CServiceBroker::UnregisterAppParams();
+  CLog::Log(LOGDEBUG, "Environment teardown complete");
 }

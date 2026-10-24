@@ -29,6 +29,7 @@
 #include "utils/Variant.h"
 #include "utils/XMLUtils.h"
 #include "utils/log.h"
+#include "platform/xbox/StartupDiagnostics.h"
 
 #include <mutex>
 
@@ -104,11 +105,14 @@ bool CGUIWindow::Load(const std::string& strFileName, bool bContainsPath)
     strPath = g_SkinInfo->GetSkinPath(strFileName, &m_coordsRes);
   }
 
+  XBOX_STARTUP::Checkpoint("window: load XML");
   bool ret = LoadXML(strPath, strLowerPath);
+  XBOX_STARTUP::Checkpoint("window: XML loaded");
   if (ret)
   {
     m_windowLoaded = true;
     OnWindowLoaded();
+    XBOX_STARTUP::Checkpoint("window: OnWindowLoaded complete");
 
 #ifdef _DEBUG
     const auto end = std::chrono::steady_clock::now();
@@ -150,7 +154,10 @@ bool CGUIWindow::LoadXML(const std::string &strPath, const std::string &strLower
   else
     CLog::Log(LOGDEBUG, "Using already stored xml root node for {}", strPath);
 
-  return Load(Prepare(m_windowXMLRootElement).get());
+  XBOX_STARTUP::Checkpoint("window: prepare includes");
+  auto prepared = Prepare(m_windowXMLRootElement);
+  XBOX_STARTUP::Checkpoint("window: create controls");
+  return Load(prepared.get());
 }
 
 std::unique_ptr<TiXmlElement> CGUIWindow::Prepare(const std::unique_ptr<TiXmlElement>& rootElement)
@@ -744,7 +751,9 @@ void CGUIWindow::AllocResources(bool forceLoad /*= false */)
 #endif
 
   // and now allocate resources
+  XBOX_STARTUP::Checkpoint("window: allocate resources");
   CGUIControlGroup::AllocResources();
+  XBOX_STARTUP::Checkpoint("window: resources allocated");
 
 #ifdef _DEBUG
   const auto end = std::chrono::steady_clock::now();

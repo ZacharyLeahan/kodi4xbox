@@ -60,6 +60,7 @@
 #include "SeekHandler.h"
 #include "ServiceBroker.h"
 #include "TextureCache.h"
+#include "platform/xbox/StartupDiagnostics.h"
 #include "filesystem/Directory.h"
 #include "filesystem/DirectoryCache.h"
 #include "filesystem/PluginDirectory.h"
@@ -939,6 +940,11 @@ int CApplication::Run()
   // Run the app
   while (!m_bStop)
   {
+    if (KODI::XBOX_STARTUP::ShouldStop())
+    {
+      Stop(EXITCODE_QUIT);
+      break;
+    }
     // Animate and render a frame
 
     lastFrameTime = std::chrono::steady_clock::now();
@@ -963,6 +969,7 @@ int CApplication::Run()
     }
   }
 
+  KODI::XBOX_STARTUP::SetStage(KODI::XBOX_STARTUP::Stage::Teardown);
   Cleanup();
 
   CLog::Log(LOGINFO, "Exiting the application...");
@@ -980,6 +987,7 @@ bool CApplication::Cleanup()
       m_ServiceManager->DeinitStageThree();
 
     CLog::Log(LOGINFO, "unload skin");
+    KODI::XBOX_STARTUP::SetStage(KODI::XBOX_STARTUP::Stage::UnloadSkin);
     GetComponent<CApplicationSkinHandling>()->UnloadSkin();
 
     CServiceBroker::UnregisterTextureCache();
@@ -990,10 +998,12 @@ bool CApplication::Cleanup()
     CScriptInvocationManager::GetInstance().Uninitialize();
 
     CRenderSystemBase *renderSystem = CServiceBroker::GetRenderSystem();
+    KODI::XBOX_STARTUP::SetStage(KODI::XBOX_STARTUP::Stage::RendererShutdown);
     if (renderSystem)
       renderSystem->DestroyRenderSystem();
 
     CWinSystemBase *winSystem = CServiceBroker::GetWinSystem();
+    KODI::XBOX_STARTUP::SetStage(KODI::XBOX_STARTUP::Stage::DestroyWindows);
     if (winSystem)
       winSystem->DestroyWindow();
 
@@ -1001,6 +1011,7 @@ bool CApplication::Cleanup()
       m_pGUI->GetWindowManager().DestroyWindows();
 
     CLog::Log(LOGINFO, "unload sections");
+    KODI::XBOX_STARTUP::SetStage(KODI::XBOX_STARTUP::Stage::DeinitServices);
 
     //  Shutdown as much as possible of the
     //  application, to reduce the leaks dumped
@@ -1033,8 +1044,11 @@ bool CApplication::Cleanup()
 
     if (m_pGUI)
     {
+      KODI::XBOX_STARTUP::Checkpoint("gui: deinit");
       m_pGUI->Deinit();
+      KODI::XBOX_STARTUP::Checkpoint("gui: destroy");
       m_pGUI.reset();
+      KODI::XBOX_STARTUP::Checkpoint("gui: destroyed");
     }
 
     if (winSystem)
@@ -1048,6 +1062,7 @@ bool CApplication::Cleanup()
     // Cleanup was called more than once on exit during my tests
     if (m_ServiceManager)
     {
+      KODI::XBOX_STARTUP::Checkpoint("services: stage one");
       m_ServiceManager->DeinitStageOne();
       m_ServiceManager.reset();
     }
@@ -1064,6 +1079,7 @@ bool CApplication::Cleanup()
     CServiceBroker::UnregisterCPUInfo();
 
     UnregisterSettings();
+    KODI::XBOX_STARTUP::Checkpoint("cleanup: complete");
 
     m_bInitializing = true;
 

@@ -1,0 +1,16 @@
+diff --git a/src/chrono.cpp b/src/chrono.cpp
+index c461d19dd..2b7e21345 100644
+--- a/src/chrono.cpp
++++ b/src/chrono.cpp
+@@ -201,7 +201,10 @@ steady_clock::now() _NOEXCEPT
+ 
+   LARGE_INTEGER counter;
+   (void) QueryPerformanceCounter(&counter);
+-  return time_point(duration(counter.QuadPart * nano::den / freq.QuadPart));
++  LONGLONG seconds = counter.QuadPart / freq.QuadPart;
++  LONGLONG fractions = counter.QuadPart % freq.QuadPart;
++  LONGLONG dur = seconds * nano::den + fractions * nano::den / freq.QuadPart;
++  return time_point(duration(dur));
+ }
+ 
+ #elif defined(CLOCK_MONOTONIC)

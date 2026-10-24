@@ -25,6 +25,30 @@ include(FindPkgConfig)
 include(PostbuildAction)
 include(PrebuildNXDK)
 
+if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS 20)
+  message(FATAL_ERROR "Kodi's NXDK runtime requires Clang 20 or newer")
+endif()
+
+include(CheckCXXSourceCompiles)
+check_cxx_source_compiles("
+#if !defined(_CPPUNWIND) || !defined(_CPPRTTI)
+#error Exceptions and RTTI must be enabled in NXDK
+#endif
+struct Base { virtual ~Base() = default; };
+struct Derived : Base {};
+int main() {
+  Derived object;
+  Base* base = &object;
+  try { throw base; }
+  catch (Base* value) { return dynamic_cast<Derived*>(value) ? 0 : 1; }
+}
+" NXDK_HAS_EXCEPTION_RUNTIME)
+if(NOT NXDK_HAS_EXCEPTION_RUNTIME)
+  message(FATAL_ERROR
+    "NXDK must include Kodi's exception/RTTI runtime. Run scripts/bootstrap-nxdk.py "
+    "and scripts/build-nxdk.sh; unpatched upstream NXDK is unsupported.")
+endif()
+
 set(CMAKE_ASM_FLAGS_DEBUG "${CMAKE_ASM_FLAGS_DEBUG} -g -gdwarf-4 -Wall -Wextra")
 set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} -g -gdwarf-4 -Wall -Wextra")
 set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -g -gdwarf-4 -Wall -Wextra")
@@ -699,6 +723,21 @@ add_executable(xbmc
 )
 
 target_include_directories(xbmc PRIVATE xbmc xbmc/cores/VideoPlayer xbmc/platform/xbox)
+
+set(KODI_XBOX_DASHBOARD_PATH "" CACHE STRING "Dashboard XBE to launch on Exit; empty uses the system dashboard")
+configure_file(cmake/XboxDashboard.h.in generated/XboxDashboard.h @ONLY)
+set_property(SOURCE xbmc/platform/xbox/main.cpp APPEND PROPERTY INCLUDE_DIRECTORIES
+  "${CMAKE_CURRENT_BINARY_DIR}/generated")
+
+option(KODI_XBOX_STARTUP_DIAGNOSTICS "Isolated profile, startup telemetry and 120s dashboard return" OFF)
+option(KODI_XBOX_DIAGNOSTIC_NORMAL_PROFILE "Use the normal profile and cache with startup diagnostics" OFF)
+if(KODI_XBOX_STARTUP_DIAGNOSTICS)
+  target_sources(xbmc PRIVATE xbmc/platform/xbox/StartupDiagnostics.cpp)
+  target_compile_definitions(xbmc PRIVATE KODI_XBOX_STARTUP_DIAGNOSTICS)
+  if(KODI_XBOX_DIAGNOSTIC_NORMAL_PROFILE)
+    target_compile_definitions(xbmc PRIVATE KODI_XBOX_DIAGNOSTIC_NORMAL_PROFILE)
+  endif()
+endif()
 
 # Bring in networking support
 target_link_libraries(xbmc PUBLIC ${NXDK_DIR}/lib/libnxdk_net.lib)

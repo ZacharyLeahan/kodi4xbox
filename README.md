@@ -24,8 +24,8 @@ will guide that work and potential upstream contributions. Each improvement
 should have a demonstrated application benefit and a clear path to retiring
 the corresponding local workaround.
 
-The [existing Xbox build guide](docs/README.NXDK.md) describes the inherited
-build setup. Toolchain and playback implementation updates will land separately.
+See the [Xbox build guide](docs/README.NXDK.md) for the pinned toolchain and
+validation limits. Experimental playback remains separate in [issue #2](https://github.com/ZacharyLeahan/kodi4xbox/issues/2).
 
 ## Download links
 This software is in alpha and currently we are only providing nightly releases.

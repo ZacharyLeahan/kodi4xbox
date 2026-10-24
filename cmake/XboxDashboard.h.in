@@ -1,0 +1,3 @@
+// Generated from the dashboard selected at configure time.
+#pragma once
+inline constexpr char KODI_XBOX_DASHBOARD_PATH[] = R"(@KODI_XBOX_DASHBOARD_PATH@)";
