@@ -248,9 +248,117 @@ changes: `build/pinned/default.xbe` SHA-256
 `66e555997520fbc0fa30f7f0b5a17e4c2a1b980913f3d9a9ef573e9b3716b38a`.
 This ordinary build has not yet been launched on the console.
 
-## Deferred playback work
+## Playback bring-up, 2026-10-21 UTC (pending)
 
-The experimental MPEG-1/MP2 player and current Pause investigation are tracked
-in [issue #2](https://github.com/ZacharyLeahan/kodi4xbox/issues/2). They are outside
-this foundation change. The issue records exact candidate identities and local
-evidence locations; earlier UI-only acceptance does not validate playback.
+Added a local MPEG-1/MP2 backend, the missing application PlayFile connection,
+player factory construction, fullscreen window, pause/seek/stop, volume/mute,
+and end-of-file cleanup. SDL shutdown uses the Slime Volley wait-loop patch.
+No change to the exception/RTTI patches or the 128 MiB target.
+
+Found the user's Hook AVI on F:; ffprobe identifies MPEG-4 Part 2 720x300 and
+48 kHz stereo MP3 despite the HEVC filename. Its original file was not modified.
+A 70-second 352x144 MPEG-1/MP2 excerpt is at
+`E:\Kodi-NXDK-test\media\Hook-test.mpg`, accessible through the added
+“NXDK playback tests” video source. Original profile sources were saved locally
+at `build/media/sources-before.xml`. No movie media is committed to the repo.
+
+First executable `6035cfb3a720ce04d43604f10b6a84af42fe99115d8d6d47e326b19f81f7498d`
+booted and reached the file browser, then halted with GPU error at texture-format
+register 0x1b04 when playing. `playback-hook-second.jpg` captures the halt;
+`playback-hook-first-audio.json` reports silence, not successful audio playback.
+pbGL's `extfmt_bytespp` explicitly rejects GL_BGRA. The correction uses RGBA,
+checks upload errors before drawing, and waits for GPU completion before
+updating the texture in place.
+
+Corrected candidate `1bc98ca29f717c5d36dfcb587e2d30fa7c8779a4a65b612467a4982944918d81`
+builds, and host ASan/UBSan checks pass for decode, nonzero PCM, forward/backward
+seek and EOF on both a generated fixture and the Hook excerpt. **Hardware
+playback is not yet validated.** The console needs a physical reboot; FTP was
+unreachable and remote power is disabled. Candidate, toolchain identity and
+resume checklist: `build/hardware/playback-rgba-candidate/`.
+
+The prior normal UI/navigation/dashboard-exit acceptance remains the separate
+`4ca8648293d35104c9d966d2064d80f0fe8ed99e07ae38aa152f8e987292d2e7`
+build recorded above. Do not count that result as playback validation.
+
+### Playback follow-up: video/audio confirmed, control stall unresolved
+
+The RGBA candidate above booted without the GPU halt but reached EOF after just
+one video frame and 3456 audio samples/channel. Both attempts and a clean UI
+exit are recorded in `build/hardware/playback-rgba-logs/`. The transferred
+7,266,304-byte clip matched its local SHA-256
+`7e06208f573565b69b77afb9fee7fcfdb42a72483deabfc303a3674e335fca8e`.
+NXDK stdio marks repeated EOF reads as errors; duration probing followed by
+seeking is a likely trigger. This SDK behavior has not been separately reproduced
+by an on-console regression test. The player now streams through Kodi CFile
+callbacks and explicitly rewinds the decoder after probing duration.
+
+Candidate `d88d4acc1c818477c705527c2c9c08c194af1a329d874348d83f5739f900cf68`
+was deployed with verified readback (`build/hardware/kodi-20261021T102730602077Z/`).
+`playback-fileio-hook1.jpg` and `playback-fileio-hook2.jpg` show different movie
+frames. `playback-fileio-hook.wav` contains 5.965 seconds of captured stereo
+audio; a two-second normalized correlation against the converted source was
+0.999275 at source offset 10.837 seconds. This confirms movie audio, not measured
+lip synchronization. The overlay showed roughly 82–89 MiB free in these frames.
+
+The console subsequently froze on the auditorium frame during control checks.
+Pause/resume, seek, OSD and Stop did not produce further screen changes. The KVM
+USB probe reported bus and mount connected; FTP was unavailable. The capture
+named `playback-fileio-pause.wav` contains low-level audio and does not establish
+a successful pause. Do not count any playback controls or EOF as hardware passes.
+A physical reboot is needed to recover this run's normal profile kodi.log.
+
+The next diagnostic candidate includes five-second decoder/queue checkpoints,
+logs around pause state changes and SDL pause calls, and a correction to update
+cached playback time immediately after seeking while paused. It uses the normal
+profile and the existing 120-second dashboard-return observer. That observer may
+recover a thread stall but cannot guarantee recovery from a kernel/GPU halt.
+
+### Pause reproduction, 2026-10-24 UTC
+
+Dashboard FTP recovered at the existing address. Prior logs were saved before
+deployment under `build/hardware/kodi-20261024T125953923009Z/`, with SHA-256
+digests. The normal profile log confirms receipt of Pause and ends at
+`Window Init (DialogSeekBar.xml)`. This narrows the trigger but does not identify
+the blocked operation or establish an SDL, GUI or SDK defect.
+
+Diagnostic XBE
+`64416d49c5a7a46e20e77c433836ba571f52a4ef17f4815f84a540dd4eb78525`
+was deployed with readback verification under
+`build/hardware/kodi-20261024T130012906828Z/` and launched under
+`build/hardware/kodi-20261024T130052472245Z/`. Browser navigation and movie
+launch worked, but Pause again left the movie frame frozen. FTP remained
+unavailable after the observer's 120-second return window. A physical reboot
+was requested to retrieve this run's pause and shutdown checkpoints; no control,
+EOF or playback-exit acceptance is established by this run.
+
+The KVM still-image endpoint initially returned the previous auditorium frame
+despite working dashboard FTP. A fresh MJPEG stream confirmed the dashboard;
+subsequent observations used stream captures. Evidence includes
+`build/hardware/control-probe-movie.jpg`, `control-probe-pause-attempt.jpg` and
+`control-probe-recovery.jpg`. Do not use a cached still as proof of console state.
+
+The diagnostic logs were subsequently recovered to
+`build/hardware/kodi-20261024T135437148535Z/`. They show `pause command complete`
+and seek-bar resource allocation completing, then stop before any
+`applying audio pause` checkpoint. The observer's last sample has 83520 KiB
+free. This narrows the next investigation to seek-bar initialization; it does
+not establish an SDL pause defect or RAM exhaustion.
+
+A focused diagnostic adds seek-bar initialization phases and per-control
+visibility/animation checkpoints. XBE
+`8d9da6fc90f394c5a48645ff0b4768defcd2147af2929c9cfde769a3483d287e`
+built successfully, passed executable readback verification in
+`build/hardware/kodi-20261024T135527654122Z/`, and launched in
+`build/hardware/kodi-20261024T135549862784Z/`. Pause again stalled before the
+seek bar became visible; dashboard FTP remained unavailable beyond the recovery
+deadline. Its detailed trace is pending another physical reboot. The saved
+candidate and status are in `build/hardware/seekbar-init-candidate/`.
+
+## Deferred handoff
+
+Playback work was paused at the owner's request on 2026-10-24.
+[Issue #2](https://github.com/ZacharyLeahan/kodi4xbox/issues/2) records the resume
+checklist. The detailed seek-bar trace remains on the console pending recovery.
+The source is preserved in the playback draft PR; no further hardware testing
+is scheduled as part of this handoff.

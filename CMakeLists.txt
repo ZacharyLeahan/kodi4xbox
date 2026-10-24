@@ -193,6 +193,8 @@ add_executable(xbmc
   xbmc/application/AppParamParser.cpp
   xbmc/commons/Exception.cpp
   xbmc/commons/ilog.cpp
+  xbmc/cores/NXDKPlayer.cpp
+  xbmc/windows/GUIWindowNXDKVideo.cpp
   xbmc/cores/DataCacheCore.cpp
   xbmc/cores/VideoSettings.cpp
   xbmc/cores/playercorefactory/PlayerCoreConfig.cpp

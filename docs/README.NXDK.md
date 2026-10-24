@@ -28,8 +28,50 @@ local build directories may contain newer experiments; compare the recorded XBE
 hash before reusing a bundle. The empty/system dashboard path, playback and HD
 rendering remain unverified.
 
-Experimental media playback is tracked separately in [issue #2](https://github.com/ZacharyLeahan/kodi4xbox/issues/2).
-The player is not enabled in this foundation change.
+**Playback is experimental and deferred in [issue #2](https://github.com/ZacharyLeahan/kodi4xbox/issues/2). Pause currently freezes the console.**
+
+## Initial native playback backend (in progress)
+
+`CNXDKPlayer` connects the previously stubbed `PlayFile` and player factory to
+local MPEG-1 program-stream video with optional MP2 stereo audio. Decoding runs
+on a worker; pbGL uploads RGBA on the GUI thread; SDL feeds the Xbox AC97 output.
+Video is limited to 720x576 by the backend, but full SD performance is not yet
+validated. Start at 352 pixels wide. File I/O streams through decoder buffers;
+the whole movie is not loaded into RAM. The audio queue is capped at one second.
+Files must be seekable local drive paths; the player currently rejects files
+larger than INT32_MAX. This does not prove all SDK file APIs have that limit.
+
+This is not the missing Kodi FFmpeg VideoPlayer. AVI/MPEG-4/MP3 (including the
+user's original Hook file), MP4/H.264, HEVC, MPEG-2/DVD, MKV, network streams,
+subtitles, passthrough and seamless playlists remain unsupported. Upstream
+pl_mpeg ignores packet PTS, so arbitrary-file A/V synchronization is not proven.
+The dependency and MIT license are recorded in `lib/pl_mpeg/`.
+
+For a compatible local copy (keep the original):
+
+```sh
+ffmpeg -i input.avi -vf 'scale=352:-2,setsar=1,fps=25' \
+  -c:v mpeg1video -b:v 1000k -c:a mp2 -ar 48000 -ac 2 -b:a 192k \
+  -f mpeg output.mpg
+```
+
+Host decoder checks, with an automatically generated six-second fixture:
+
+```sh
+bash tests/playback/run-host.sh
+```
+
+These exercise nonzero video/PCM, forward/backward seeking and EOF with address
+and undefined-behavior sanitizers. They do not test Xbox rendering or audio DMA.
+The RGBA upload correction eliminated the initial GPU texture-format halt.
+Using Kodi file callbacks also fixed an early decoder EOF encountered with NXDK
+stdio. A converted Hook excerpt now produces moving video and matching stereo
+audio on the 128 MiB Xbox (captured audio correlation 0.9993 against the source).
+The console subsequently froze during playback-control checks. Pause, seek,
+stop, full-clip playback and playback shutdown are **not yet validated**. The
+next diagnostic build adds pause/progress checkpoints and the existing
+two-minute dashboard-return watchdog. See `XBOX-STARTUP-TEST.md` for evidence;
+the playback candidate is not yet an accepted replacement for the prior UI build.
 
 ## Prerequisites
 

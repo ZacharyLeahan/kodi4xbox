@@ -516,6 +516,11 @@ EVENT_RESULT CGUIWindow::OnMouseEvent(const CPoint& point, const MOUSE::CMouseEv
 /// calling the base method.
 void CGUIWindow::OnInitWindow()
 {
+  auto checkpoint = [this](const char* phase) {
+    if (GetID() == WINDOW_DIALOG_SEEK_BAR)
+      XBOX_STARTUP::Checkpoint(phase);
+  };
+  checkpoint("seekbar: init sound");
   //  Play the window specific init sound
   if (IsSoundEnabled())
     CServiceBroker::GetGUI()->GetAudioManager().PlayWindowSound(GetID(), SOUND_INIT);
@@ -524,6 +529,7 @@ void CGUIWindow::OnInitWindow()
   m_hasProcessed = false;
   m_closing = false;
   m_active = true;
+  checkpoint("seekbar: reset animations");
   ResetAnimations();  // we need to reset our animations as those windows that don't dynamically allocate
                       // need their anims reset. An alternative solution is turning off all non-dynamic
                       // allocation (which in some respects may be nicer, but it kills hdd spindown and the like)
@@ -532,15 +538,21 @@ void CGUIWindow::OnInitWindow()
   // focusing the default control, and again afterward to make sure that
   // any controls that depend on the state of the focused control (and or on
   // control states) are active.
+  checkpoint("seekbar: initial visibility");
   SetInitialVisibility();
+  checkpoint("seekbar: restore controls");
   RestoreControlStates();
+  checkpoint("seekbar: second visibility");
   SetInitialVisibility();
+  checkpoint("seekbar: queue animation");
   QueueAnimation(ANIM_TYPE_WINDOW_OPEN);
 
   if (!m_manualRunActions)
   {
+    checkpoint("seekbar: load actions");
     RunLoadActions();
   }
+  checkpoint("seekbar: init complete");
 }
 
 // Called on window close.

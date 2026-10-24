@@ -19,6 +19,8 @@
 #include "input/actions/Action.h"
 #include "input/actions/ActionIDs.h"
 #include "utils/log.h"
+#include "platform/xbox/StartupDiagnostics.h"
+#include <cstdio>
 
 using namespace KODI;
 using namespace GUILIB;
@@ -618,6 +620,18 @@ bool CGUIControl::UpdateColors(const CGUIListItem* item)
 
 void CGUIControl::SetInitialVisibility()
 {
+#ifdef KODI_XBOX_STARTUP_DIAGNOSTICS
+  auto checkpoint = [this](const char* phase) {
+    if (GetParentID() == WINDOW_DIALOG_SEEK_BAR || GetID() == WINDOW_DIALOG_SEEK_BAR)
+    {
+      char text[160];
+      snprintf(text, sizeof(text), "seekbar control=%d type=%d: %s", GetID(),
+               static_cast<int>(GetControlType()), phase);
+      XBOX_STARTUP::Checkpoint(text);
+    }
+  };
+  checkpoint(m_visibleCondition ? m_visibleCondition->GetExpression().c_str() : "no visibility condition");
+#endif
   if (m_visibleCondition)
   {
     m_visibleFromSkinCondition = m_visibleCondition->Get(INFO::DEFAULT_CONTEXT);
@@ -627,6 +641,9 @@ void CGUIControl::SetInitialVisibility()
   else if (m_visible == DELAYED)
     m_visible = VISIBLE;
   // and handle animation conditions as well
+#ifdef KODI_XBOX_STARTUP_DIAGNOSTICS
+  checkpoint("animation conditions");
+#endif
   for (unsigned int i = 0; i < m_animations.size(); i++)
   {
     CAnimation &anim = m_animations[i];
@@ -637,10 +654,16 @@ void CGUIControl::SetInitialVisibility()
   // this may need to be reviewed at a later date
   if (m_enableCondition)
     m_enabled = m_enableCondition->Get(INFO::DEFAULT_CONTEXT);
+#ifdef KODI_XBOX_STARTUP_DIAGNOSTICS
+  checkpoint("hidden focus and colors");
+#endif
   m_allowHiddenFocus.Update(INFO::DEFAULT_CONTEXT);
   UpdateColors(nullptr);
 
   MarkDirtyRegion();
+#ifdef KODI_XBOX_STARTUP_DIAGNOSTICS
+  checkpoint("visibility complete");
+#endif
 }
 
 void CGUIControl::SetVisibleCondition(const std::string &expression, const std::string &allowHiddenFocus)
