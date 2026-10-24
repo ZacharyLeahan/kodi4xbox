@@ -9,6 +9,7 @@
 #include "PlayerCoreConfig.h"
 
 #include "cores/IPlayer.h"
+#include "cores/NXDKPlayer.h"
 #ifdef HAS_UPNP
 #include "network/upnp/UPnPPlayer.h"
 #endif
@@ -40,32 +41,9 @@ std::shared_ptr<IPlayer> CPlayerCoreConfig::CreatePlayer(IPlayerCallback& callba
 {
   std::shared_ptr<IPlayer> player;
 
-#if 0
-  if (m_type.compare("video") == 0)
-  {
-    player = std::make_shared<CVideoPlayer>(callback);
-  }
-  else if (m_type.compare("music") == 0)
-  {
-    player = std::make_shared<PAPlayer>(callback);
-  }
-  else if (m_type.compare("game") == 0)
-  {
-    player = std::make_shared<KODI::RETRO::CRetroPlayer>(callback);
-  }
-  else if (m_type.compare("external") == 0)
-  {
-    player = std::make_shared<CExternalPlayer>(callback);
-  }
-
-#if defined(HAS_UPNP)
-  else if (m_type.compare("remote") == 0)
-  {
-    player = std::make_shared<UPNP::CUPnPPlayer>(callback, m_id.c_str());
-  }
-#endif
+  if (m_type == "video")
+    player = std::make_shared<CNXDKPlayer>(callback);
   else
-#endif
     return nullptr;
 
   if (!player)

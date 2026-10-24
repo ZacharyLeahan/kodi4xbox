@@ -21,6 +21,11 @@ Original source license/copyright notices are retained in patches. Regenerate
 patches from the cited source changes and review them when upgrading the pin;
 do not follow a moving exception-fork branch during CI builds.
 
+`SDL2` also carries `sdl-audio-shutdown.patch`, brought over from the user’s
+Slime Volley NXDK port. Its AC97 wait checks the SDL shutdown flag every 100 ms
+without treating a timeout as DMA completion. This keeps a missing completion
+interrupt from blocking device closure forever. The bootstrap records its hash.
+
 ## Runtime scope
 
 This preserves an experimental exception runtime, not a complete MSVC runtime.

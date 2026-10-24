@@ -9,7 +9,8 @@ import subprocess
 ROOT = Path(__file__).resolve().parents[1]
 REVISION = "119ab2f7b04a92a8ac4f4f35e61e0901224656a1"
 PATCHES = [(".", "runtime.patch"), ("lib/libcxx", "libcxx.patch"),
-           ("lib/pdclib", "pdclib.patch")]
+           ("lib/pdclib", "pdclib.patch"),
+           ("lib/sdl/SDL2", "sdl-audio-shutdown.patch")]
 
 
 def git(directory, *args):

@@ -76,14 +76,8 @@ void CApplicationVolumeHandling::ShowVolumeBar(const CAction* action)
 
 bool CApplicationVolumeHandling::IsMuted() const
 {
-#if 0
-  if (CServiceBroker::GetPeripherals().IsMuted())
-    return true;
-  IAE* ae = CServiceBroker::GetActiveAE();
-  if (ae)
-    return ae->IsMuted();
-#endif
-  return true;
+  // NXDK players own their SDL output; there is no central AudioEngine yet.
+  return m_muted;
 }
 
 void CApplicationVolumeHandling::ToggleMute(void)

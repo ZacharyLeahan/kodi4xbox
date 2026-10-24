@@ -69,6 +69,7 @@
 #include "guilib/LocalizeStrings.h"
 #include "input/keyboard/KeyboardLayoutManager.h"
 #include "input/actions/ActionTranslator.h"
+#include "input/actions/ActionIDs.h"
 #include "messaging/ApplicationMessenger.h"
 #include "messaging/ThreadMessage.h"
 #include "messaging/helpers/DialogHelper.h"
@@ -751,6 +752,35 @@ bool CApplication::OnAction(const CAction &action)
   if (GetComponent<CApplicationActionListeners>()->NotifyActionListeners(action))
     return true;
 
+  const auto volume = GetComponent<CApplicationVolumeHandling>();
+  if (action.GetID() == ACTION_MUTE)
+  {
+    volume->ToggleMute();
+    return true;
+  }
+  if (action.GetID() == ACTION_VOLUME_UP || action.GetID() == ACTION_VOLUME_DOWN)
+  {
+    volume->SetVolume(volume->GetVolumePercent() + (action.GetID() == ACTION_VOLUME_UP ? 2 : -2));
+    return true;
+  }
+  const auto player = GetComponent<CApplicationPlayer>();
+  if (player->IsPlaying())
+  {
+    if (action.GetID() == ACTION_STOP)
+    {
+      StopPlaying();
+      return true;
+    }
+    if (action.GetID() == ACTION_PAUSE || action.GetID() == ACTION_PLAYER_PLAYPAUSE)
+    {
+      player->Pause();
+      return true;
+    }
+    if (action.GetID() == ACTION_SHOW_GUI &&
+        CServiceBroker::GetGUI()->GetWindowManager().GetActiveWindow() != WINDOW_FULLSCREEN_VIDEO)
+      return CServiceBroker::GetGUI()->GetWindowManager().SwitchToFullScreen();
+  }
+
   // in normal case
   // just pass the action to the current window and let it handle it
   if (CServiceBroker::GetGUI()->GetWindowManager().OnAction(action))
@@ -1250,8 +1280,28 @@ bool CApplication::PlayStack(CFileItem& item, bool bRestart)
 
 bool CApplication::PlayFile(CFileItem item, const std::string& player, bool bRestart)
 {
-  // TODO: implement this
-  return false;
+  const auto appPlayer = GetComponent<CApplicationPlayer>();
+  // Close any prior session before replacing its callbacks and cached state.
+  appPlayer->ClosePlayer();
+  CPlayerOptions options;
+  options.fullscreen = true;
+  if (item.GetStartOffset() > 0)
+    options.starttime = item.GetStartOffset() / 1000.0;
+  if (!appPlayer->OpenFile(item, options, m_ServiceManager->GetPlayerCoreFactory(), player, *this))
+  {
+    appPlayer->ClosePlayer();
+    CServiceBroker::GetJobManager()->UnPauseJobs();
+    CLog::Log(LOGERROR, "Playback failed: {}", item.GetPath());
+    HELPERS::ShowOKDialogText(CVariant{"Playback unavailable"},
+        CVariant{"This build plays local MPEG-1 video with MP2 audio in .mpg files. "
+                 "AVI, MP4, MKV and other codecs are not supported yet. "
+                 "See kodi.log for the playback error."});
+    return false;
+  }
+  *m_itemCurrentFile = item;
+  CServiceBroker::GetGUI()->GetInfoManager().UpdateCurrentItem(item);
+  CServiceBroker::GetGUI()->GetWindowManager().ActivateWindow(WINDOW_FULLSCREEN_VIDEO);
+  return true;
 }
 
 void CApplication::PlaybackCleanup()
@@ -1359,6 +1409,18 @@ bool CApplication::OnMessage(CGUIMessage& message)
 {
   switch (message.GetMessage())
   {
+  case GUI_MSG_PLAYBACK_ENDED:
+  case GUI_MSG_PLAYBACK_STOPPED:
+    // A replacement file can already be playing when an old stop message arrives.
+    if (!GetComponent<CApplicationPlayer>()->IsPlaying())
+    {
+      GetComponent<CApplicationPlayer>()->ClosePlayer();
+      CServiceBroker::GetJobManager()->UnPauseJobs();
+      PlaybackCleanup();
+      ResetCurrentItem();
+    }
+    return true;
+
   case GUI_MSG_NOTIFY_ALL:
     {
       if (message.GetParam1() == GUI_MSG_UI_READY)

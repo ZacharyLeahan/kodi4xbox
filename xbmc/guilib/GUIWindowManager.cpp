@@ -104,6 +104,7 @@
 #include "dialogs/GUIDialogPlayEject.h"
 #endif
 #include "dialogs/GUIDialogMediaFilter.h"
+#include "windows/GUIWindowNXDKVideo.h"
 #include "video/dialogs/GUIDialogSubtitles.h"
 
 using namespace KODI;
@@ -130,6 +131,7 @@ void CGUIWindowManager::Initialize()
 
 void CGUIWindowManager::CreateWindows()
 {
+  Add(new CGUIWindowNXDKVideo);
   Add(new CGUIWindowHome);
   Add(new CGUIWindowPrograms);
   Add(new CGUIWindowPictures);
